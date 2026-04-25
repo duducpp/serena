@@ -23,7 +23,7 @@ from solidlsp.language_servers.typescript_language_server import (
 from solidlsp.ls import LSPFileBuffer, SolidLanguageServer
 from solidlsp.ls_config import FilenameMatcher, Language, LanguageServerConfig
 from solidlsp.ls_exceptions import SolidLSPException
-from solidlsp.ls_types import Location
+from solidlsp.ls_types import Location, WorkspaceEdit
 from solidlsp.ls_utils import PathUtils
 from solidlsp.lsp_protocol_handler import lsp_types
 from solidlsp.lsp_protocol_handler.lsp_types import DocumentSymbol, InitializeParams, SymbolInformation
@@ -307,19 +307,19 @@ class SvelteLanguageServer(SolidLanguageServer):
         return result
 
     @override
-    def request_references(self, relative_file_path: str, line: int, column: int) -> list[lsp_types.Location]:
+    def request_references(self, relative_file_path: str, line: int, column: int) -> list[Location]:
         self._ensure_ls_operational()
         return self._send_ts_references_request(relative_file_path, line=line, column=column)
 
     @override
-    def request_definition(self, relative_file_path: str, line: int, column: int) -> list[lsp_types.Location]:
+    def request_definition(self, relative_file_path: str, line: int, column: int) -> list[Location]:
         self._ensure_ls_operational()
         assert self._ts_server is not None
         with self._ts_server.open_file(relative_file_path):
             return self._ts_server.request_definition(relative_file_path, line, column)
 
     @override
-    def request_rename_symbol_edit(self, relative_file_path: str, line: int, column: int, new_name: str) -> lsp_types.WorkspaceEdit | None:
+    def request_rename_symbol_edit(self, relative_file_path: str, line: int, column: int, new_name: str) -> WorkspaceEdit | None:
         self._ensure_ls_operational()
         assert self._ts_server is not None
         with self._ts_server.open_file(relative_file_path):
@@ -668,7 +668,7 @@ class SvelteLanguageServer(SolidLanguageServer):
         super().stop(shutdown_timeout)
 
     @override
-    def _get_preferred_definition(self, definitions: list[lsp_types.Location]) -> lsp_types.Location:
+    def _get_preferred_definition(self, definitions: list[Location]) -> Location:
         return prefer_non_node_modules_definition(definitions)
 
     @override
