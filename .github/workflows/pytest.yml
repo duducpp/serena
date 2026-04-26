@@ -16,11 +16,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  UV_CACHE_DIR: .uv-cache
-  PNPM_HOME: ${{ github.workspace }}/.pnpm-home
-  PNPM_STORE_DIR: ${{ github.workspace }}/.pnpm-store
-  R_LIBS_USER: ${{ github.workspace }}/.r-library
-  JULIA_DEPOT_PATH: ${{ github.workspace }}/.julia
   LUA_LS_VERSION: "3.15.0"
   VERIBLE_VERSION: "v0.0-4051-g9fdb4057"
   REGAL_VERSION: "0.39.0"
@@ -56,6 +51,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -65,21 +62,30 @@ jobs:
         with:
           path: |
             .venv
-            .uv-cache
-          key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
+            ${{ runner.temp }}/uv-cache
+          key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}-v3
           restore-keys: |
             python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
             python-${{ runner.os }}-
 
       - name: Install Python environment
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
-        run: uv sync --extra dev --locked
+        run: |
+          rm -rf .uv-cache
+          uv sync --extra dev --locked
+          rm -rf .uv-cache
 
       - name: Check formatting
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
         run: uv run poe lint
 
       - name: Type-checking with mypy
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
         run: uv run poe type-check
 
@@ -93,7 +99,7 @@ jobs:
       matrix:
         shard:
           - name: core
-            tools: "python node go ruby"
+            tools: "python node go ruby nix"
             markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
           - name: web
             tools: "python node web"
@@ -144,7 +150,7 @@ jobs:
         os: [windows-latest, macos-latest]
         shard:
           - name: core
-            tools: "python node go ruby"
+            tools: "python node go ruby nix"
             markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
           - name: web
             tools: "python node web"

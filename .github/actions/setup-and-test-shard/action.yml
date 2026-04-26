@@ -18,8 +18,13 @@ runs:
     - name: Prepare cache directories
       shell: bash
       run: |
+        echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
+        echo "PNPM_HOME=$RUNNER_TEMP/pnpm-home" >> "$GITHUB_ENV"
+        echo "PNPM_STORE_DIR=$RUNNER_TEMP/pnpm-store" >> "$GITHUB_ENV"
+        echo "R_LIBS_USER=$RUNNER_TEMP/r-library" >> "$GITHUB_ENV"
+        echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/julia" >> "$GITHUB_ENV"
         mkdir -p \
-          .uv-cache \
+          "$RUNNER_TEMP/uv-cache" \
           "$HOME/.serena/language_servers/static" \
           "$HOME/bin" \
           "$HOME/perl5" \
@@ -29,12 +34,12 @@ runs:
           "$HOME/.cache/dune" \
           "$HOME/.cabal" \
           "$HOME/.ghcup" \
-          "$PNPM_HOME" \
-          "$PNPM_STORE_DIR" \
-          "$R_LIBS_USER" \
-          "$JULIA_DEPOT_PATH"
+          "$RUNNER_TEMP/pnpm-home" \
+          "$RUNNER_TEMP/pnpm-store" \
+          "$RUNNER_TEMP/r-library" \
+          "$RUNNER_TEMP/julia"
         echo "$HOME/bin" >> "$GITHUB_PATH"
-        echo "$PNPM_HOME" >> "$GITHUB_PATH"
+        echo "$RUNNER_TEMP/pnpm-home" >> "$GITHUB_PATH"
         echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
         echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
         echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
@@ -51,6 +56,8 @@ runs:
 
     - name: Install uv
       uses: astral-sh/setup-uv@v8.1.0
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       with:
         enable-cache: true
         cache-dependency-glob: uv.lock
@@ -60,15 +67,20 @@ runs:
       with:
         path: |
           .venv
-          .uv-cache
-        key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
+          ${{ runner.temp }}/uv-cache
+        key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}-v3
         restore-keys: |
           python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
           python-${{ runner.os }}-
 
     - name: Install Python environment
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       shell: bash
-      run: uv sync --extra dev --locked
+      run: |
+        rm -rf .uv-cache
+        uv sync --extra dev --locked
+        rm -rf .uv-cache
 
     - name: Set up Node.js
       if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
@@ -88,8 +100,8 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          .pnpm-home
-          .pnpm-store
+          ${{ runner.temp }}/pnpm-home
+          ${{ runner.temp }}/pnpm-store
         key: node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-${{ hashFiles('.github/workflows/pytest.yml', '.github/actions/setup-and-test-shard/action.yml') }}
         restore-keys: |
           node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-
@@ -149,8 +161,8 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          .r-library
-          .julia
+          ${{ runner.temp }}/r-library
+          ${{ runner.temp }}/julia
         key: r-julia-${{ runner.os }}-r-${{ env.R_VERSION }}-julia-${{ env.JULIA_VERSION }}-v2
         restore-keys: |
           r-julia-${{ runner.os }}-
@@ -637,6 +649,7 @@ runs:
         if has_group nix; then install_nixd; fi
 
         verify_fpc
+        rm -rf .uv-cache
 
     - name: Report free disk space
       if: runner.os == 'Linux'
@@ -644,5 +657,9 @@ runs:
       run: df -h
 
     - name: Test with pytest
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       shell: bash
-      run: uv run poe test -q --tb=short -m "${{ inputs.shard-markers }}"
+      run: |
+        rm -rf .uv-cache
+        uv run poe test -q --tb=short -m "${{ inputs.shard-markers }}"
