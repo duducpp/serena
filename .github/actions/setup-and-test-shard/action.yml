@@ -21,6 +21,7 @@ runs:
         echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
         echo "PNPM_HOME=$RUNNER_TEMP/pnpm-home" >> "$GITHUB_ENV"
         echo "PNPM_STORE_DIR=$RUNNER_TEMP/pnpm-store" >> "$GITHUB_ENV"
+        echo "ELM_HOME=$RUNNER_TEMP/elm-home" >> "$GITHUB_ENV"
         echo "R_LIBS_USER=$RUNNER_TEMP/r-library" >> "$GITHUB_ENV"
         echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/julia" >> "$GITHUB_ENV"
         mkdir -p \
@@ -36,12 +37,14 @@ runs:
           "$HOME/.ghcup" \
           "$RUNNER_TEMP/pnpm-home" \
           "$RUNNER_TEMP/pnpm-store" \
+          "$RUNNER_TEMP/elm-home" \
           "$RUNNER_TEMP/r-library" \
           "$RUNNER_TEMP/julia"
         echo "$HOME/bin" >> "$GITHUB_PATH"
         echo "$RUNNER_TEMP/pnpm-home" >> "$GITHUB_PATH"
         echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
         echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
         echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
         echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
         echo "PERL5LIB=$HOME/perl5/lib/perl5${PERL5LIB:+:${PERL5LIB}}" >> "$GITHUB_ENV"
@@ -102,6 +105,7 @@ runs:
         path: |
           ${{ runner.temp }}/pnpm-home
           ${{ runner.temp }}/pnpm-store
+          ${{ runner.temp }}/elm-home
         key: node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-${{ hashFiles('.github/workflows/pytest.yml', '.github/actions/setup-and-test-shard/action.yml') }}
         restore-keys: |
           node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-
@@ -140,7 +144,7 @@ runs:
         path: |
           ~/.serena/language_servers
           ~/bin
-        key: static-ls-${{ runner.os }}-${{ inputs.shard-name }}-lua-${{ env.LUA_LS_VERSION }}-zls-${{ env.ZLS_VERSION }}-verible-${{ env.VERIBLE_VERSION }}-regal-${{ env.REGAL_VERSION }}-v2
+        key: static-ls-${{ runner.os }}-${{ inputs.shard-name }}-lua-${{ env.LUA_LS_VERSION }}-zls-${{ env.ZLS_VERSION }}-haxe-${{ env.HAXE_VERSION }}-verible-${{ env.VERIBLE_VERSION }}-regal-${{ env.REGAL_VERSION }}-v4
         restore-keys: |
           static-ls-${{ runner.os }}-${{ inputs.shard-name }}-
           static-ls-${{ runner.os }}-
@@ -301,7 +305,7 @@ runs:
         terraform_wrapper: false
 
     - name: Set up Haxe
-      if: contains(inputs.shard-tools, 'web')
+      if: contains(inputs.shard-tools, 'web') && runner.os != 'Linux'
       uses: krdlab/setup-haxe@v2
       with:
         haxe-version: ${{ env.HAXE_VERSION }}
@@ -325,6 +329,72 @@ runs:
 
         has_group() {
           [[ " ${{ inputs.shard-tools }} " == *" $1 "* ]]
+        }
+
+        ensure_windows_action_paths() {
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            return
+          fi
+
+          local ci_bin ci_bin_win
+          ci_bin="${RUNNER_TEMP:-$HOME}/ci-bin"
+          ci_bin=$(cygpath -u "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          ci_bin_win=$(cygpath -w "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          mkdir -p "$ci_bin"
+
+          if has_group lean; then
+            local lean_bin
+            lean_bin=$(find /c/Users/runneradmin/.elan /c/Users/runneradmin -iname "lean.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$lean_bin" ]]; then
+              echo "Could not locate lean.exe after leanprover/lean-action" >&2
+              return 1
+            fi
+            lean_bin=$(dirname "$lean_bin")
+            for tool in elan lake lean; do
+              if [[ -x "$lean_bin/$tool.exe" ]]; then
+                printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$lean_bin/$tool.exe" > "$ci_bin/$tool"
+                printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$lean_bin/$tool.exe")" > "$ci_bin/$tool.cmd"
+                chmod +x "$ci_bin/$tool"
+              fi
+            done
+            export PATH="$ci_bin:$lean_bin:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$lean_bin")" >> "$GITHUB_PATH"
+          fi
+
+          if has_group ocaml; then
+            local opam_exe opam_dir opam_windows_path
+            opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
+            if [[ -n "$opam_windows_path" ]]; then
+              opam_exe=$(cygpath -u "$opam_windows_path")
+            else
+              opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+            fi
+            if [[ -z "$opam_exe" ]]; then
+              echo "Could not locate opam.exe after ocaml/setup-ocaml" >&2
+              return 1
+            fi
+            opam_dir=$(dirname "$opam_exe")
+            printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$opam_exe" > "$ci_bin/opam"
+            printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$opam_exe")" > "$ci_bin/opam.cmd"
+            chmod +x "$ci_bin/opam"
+            export PATH="$ci_bin:$opam_dir:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$opam_dir")" >> "$GITHUB_PATH"
+          fi
+        }
+
+        download_with_retry() {
+          local url="$1"
+          local output="$2"
+          for attempt in 1 2 3 4 5; do
+            if curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url"; then
+              return 0
+            fi
+            echo "Download failed for $url on attempt $attempt"
+            sleep $((attempt * 10))
+          done
+          return 1
         }
 
         install_gopls() {
@@ -387,19 +457,94 @@ runs:
         }
 
         install_ocaml_packages() {
-          if opam list -i ocaml-lsp-server >/dev/null 2>&1; then
+          # Ensure this shell sees the same opam switch/environment as setup-ocaml.
+          eval "$(opam env 2>/dev/null || true)"
+
+          if opam exec -- which ocamllsp >/dev/null 2>&1; then
             return
           fi
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            opam install -y dune ocaml-lsp-server
+            opam exec -- opam install -y dune ocaml-lsp-server
           else
-            opam install -y dune 'ocaml-lsp-server>=1.23.0'
+            opam exec -- opam install -y dune 'ocaml-lsp-server>=1.23.0'
+          fi
+        }
+
+        verify_ocaml_lsp() {
+          if ! has_group ocaml; then
+            return
+          fi
+
+          eval "$(opam env 2>/dev/null || true)"
+          opam exec -- which ocamllsp >/dev/null
+          opam exec -- ocamllsp --version >/dev/null
+        }
+
+        verify_lsp_paths() {
+          if has_group go; then
+            command -v gopls >/dev/null
+            gopls version >/dev/null 2>&1 || true
+          fi
+
+          if has_group ruby; then
+            command -v ruby-lsp >/dev/null
+            ruby-lsp --version >/dev/null 2>&1 || true
+          fi
+
+          if has_group compiled; then
+            command -v ccls >/dev/null
+            command -v zls >/dev/null
+            command -v verible-verilog-ls >/dev/null
+            if [[ "$RUNNER_OS" != "Windows" ]]; then
+              command -v sourcekit-lsp >/dev/null
+            fi
+          fi
+
+          if has_group data; then
+            Rscript -e "library(languageserver)" >/dev/null
+            julia -e "using LanguageServer" >/dev/null
+          fi
+
+          if has_group niche; then
+            command -v lua-language-server >/dev/null
+            if [[ "$RUNNER_OS" != "Windows" ]]; then
+              perl -MPerl::LanguageServer -e 1 >/dev/null
+              command -v regal >/dev/null
+            else
+              command -v regal.exe >/dev/null
+            fi
+          fi
+
+          if has_group nix && [[ "$RUNNER_OS" != "Windows" ]]; then
+            command -v nixd >/dev/null
           fi
         }
 
         install_r_language_server() {
-          Rscript -e "dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); if (!requireNamespace('languageserver', quietly=TRUE)) install.packages('languageserver', repos='https://cloud.r-project.org', lib=Sys.getenv('R_LIBS_USER')); library(languageserver)"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libuv1-dev pkg-config
+          fi
+
+          Rscript - <<'RSCRIPT'
+        dir.create(Sys.getenv("R_LIBS_USER"), recursive = TRUE, showWarnings = FALSE)
+        repos <- getOption("repos")
+        if (identical(repos["CRAN"], "@CRAN@")) repos["CRAN"] <- "https://cloud.r-project.org"
+        options(repos = repos)
+        options(pkgType = if (.Platform$pkgType == "both") "binary" else .Platform$pkgType)
+        pkgs <- c("fs", "pkgload", "roxygen2", "languageserver")
+        missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+        if (length(missing) > 0) {
+          install.packages(
+            missing,
+            lib = Sys.getenv("R_LIBS_USER"),
+            dependencies = TRUE,
+            Ncpus = max(1L, parallel::detectCores() - 1L)
+          )
+        }
+        library(languageserver)
+        RSCRIPT
         }
 
         install_julia_language_server() {
@@ -430,12 +575,12 @@ runs:
           fi
 
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            wget "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz"
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz" zls-x86_64-linux.tar.xz
             tar -xf zls-x86_64-linux.tar.xz
             mv zls "$HOME/bin/"
             rm zls-x86_64-linux.tar.xz
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            wget "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-macos.tar.xz"
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-macos.tar.xz" zls-x86_64-macos.tar.xz
             tar -xf zls-x86_64-macos.tar.xz
             mv zls "$HOME/bin/"
             rm zls-x86_64-macos.tar.xz
@@ -453,12 +598,12 @@ runs:
           fi
 
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            wget "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
             tar -xzf "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
             mv "verible-${VERIBLE_VERSION}/bin/verible-verilog-ls" "$HOME/bin/"
             rm -rf "verible-${VERIBLE_VERSION}" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            wget "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz"
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
             tar -xzf "verible-${VERIBLE_VERSION}-macOS.tar.gz"
             mv "verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls" "$HOME/bin/"
             rm -rf "verible-${VERIBLE_VERSION}-macOS" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
@@ -481,13 +626,13 @@ runs:
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             local arch="x64"
             [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
-            wget "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
+            download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
             tar -xzf "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" -C "$lua_ls_dir"
             rm "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             local arch="x64"
             [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
-            wget "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
+            download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
             tar -xzf "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" -C "$lua_ls_dir"
             rm "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -498,7 +643,12 @@ runs:
 
           chmod +x "$lua_ls_dir/bin/lua-language-server" 2>/dev/null || true
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "$lua_ls_dir/bin" >> "$GITHUB_PATH"
+            cat > "$HOME/bin/lua-language-server" <<'EOF'
+        #!/usr/bin/env bash
+        cd "${HOME}/.serena/language_servers/lua/bin"
+        exec ./lua-language-server.exe "$@"
+        EOF
+            chmod +x "$HOME/bin/lua-language-server"
           else
             cat > "$HOME/bin/lua-language-server" <<'EOF'
         #!/usr/bin/env bash
@@ -530,11 +680,81 @@ runs:
           uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv run pip install ansible-core ansible-lint
         }
 
-        install_elm() {
-          if command -v elm >/dev/null 2>&1 && elm --version | grep -q '^0\.19\.1$'; then
+        install_haxe() {
+          if command -v haxe >/dev/null 2>&1 && haxe -version | grep -q "^${HAXE_VERSION}$"; then
+            haxe -version
             return
           fi
-          pnpm add -g "elm@${ELM_VERSION}"
+
+          if [[ "$RUNNER_OS" != "Linux" ]]; then
+            command -v haxe >/dev/null
+            haxe -version
+            return
+          fi
+
+          local haxe_root="$HOME/.serena/language_servers/static/haxe-${HAXE_VERSION}"
+          local neko_root="$HOME/.serena/language_servers/static/neko-2.4.0"
+          local haxe_archive="$RUNNER_TEMP/haxe-${HAXE_VERSION}-linux64.tar.gz"
+          local neko_archive="$RUNNER_TEMP/neko-2.4.0-linux64.tar.gz"
+          mkdir -p "$haxe_root" "$neko_root"
+
+          if [[ ! -x "$haxe_root/haxe" || -z "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)" || -z "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)" ]]; then
+            rm -rf "$haxe_root" "$neko_root"
+            mkdir -p "$haxe_root" "$neko_root"
+            download_with_retry "https://github.com/HaxeFoundation/neko/releases/download/v2-4-0/neko-2.4.0-linux64.tar.gz" "$neko_archive"
+            download_with_retry "https://github.com/HaxeFoundation/haxe/releases/download/${HAXE_VERSION}/haxe-${HAXE_VERSION}-linux64.tar.gz" "$haxe_archive"
+            tar -xzf "$neko_archive" -C "$neko_root" --strip-components=1
+            tar -xzf "$haxe_archive" -C "$haxe_root" --strip-components=1
+            mkdir -p "$haxe_root/lib"
+          fi
+
+          local neko_bin_dir
+          local neko_lib_dir
+          local neko_lib_path
+          neko_bin_dir=$(dirname "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)")
+          neko_lib_dir=$(dirname "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)")
+          if [[ -z "$neko_bin_dir" || -z "$neko_lib_dir" ]]; then
+            echo "Could not locate Neko runtime under $neko_root"
+            find "$neko_root" -maxdepth 3 -type f | sort
+            return 1
+          fi
+
+          neko_lib_path="$neko_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export PATH="$haxe_root:$neko_bin_dir:$PATH"
+          export LD_LIBRARY_PATH="$neko_lib_path"
+          echo "$haxe_root" >> "$GITHUB_PATH"
+          echo "$neko_bin_dir" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$neko_lib_path" >> "$GITHUB_ENV"
+          haxelib setup "$haxe_root/lib"
+          haxe -version
+        }
+
+        install_elm() {
+          if command -v elm >/dev/null 2>&1 && elm --version | grep -q '^0\.19\.1$'; then
+            echo "Elm compiler already installed"
+          else
+            local asset output
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              asset="binary-for-linux-64-bit.gz"
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              if [[ "$(uname -m)" == "arm64" ]]; then
+                asset="binary-for-mac-64-bit-ARM.gz"
+              else
+                asset="binary-for-mac-64-bit.gz"
+              fi
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              asset="binary-for-windows-64-bit.gz"
+              output="$HOME/bin/elm.exe"
+            fi
+
+            download_with_retry "https://github.com/elm/compiler/releases/download/${ELM_VERSION}/${asset}" "$RUNNER_TEMP/$asset"
+            python -c 'import gzip, pathlib, sys; pathlib.Path(sys.argv[2]).write_bytes(gzip.open(sys.argv[1], "rb").read())' "$RUNNER_TEMP/$asset" "$output"
+            chmod +x "$output" 2>/dev/null || true
+          fi
+          elm --version
+          (cd test/resources/repos/elm/test_repo && elm make Main.elm --output="$RUNNER_TEMP/elm-test.js")
         }
 
         install_nixd() {
@@ -549,7 +769,12 @@ runs:
         }
 
         install_regal() {
-          if command -v regal >/dev/null 2>&1; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            rm -f "$HOME/bin/regal"
+            if command -v regal.exe >/dev/null 2>&1; then
+              return
+            fi
+          elif command -v regal >/dev/null 2>&1; then
             return
           fi
 
@@ -563,6 +788,7 @@ runs:
             curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_${arch}"
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
             curl -L -o "$HOME/bin/regal.exe" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Windows_x86_64.exe"
+            chmod +x "$HOME/bin/regal.exe" 2>/dev/null || true
           fi
           chmod +x "$HOME/bin/regal" 2>/dev/null || true
         }
@@ -638,6 +864,8 @@ runs:
           [[ -d "$FPCDIR" ]]
         }
 
+        ensure_windows_action_paths
+
         if has_group go; then install_gopls; fi
         if has_group ruby; then install_ruby_lsp; fi
         if has_group compiled; then install_ccls; install_swift; install_zls; install_verible; install_fpc; fi
@@ -645,9 +873,11 @@ runs:
         if has_group data; then install_r_language_server; install_julia_language_server; fi
         if has_group haskell; then build_haskell_repo; fi
         if has_group niche; then install_lua_language_server; install_perl_language_server; install_ansible_tools; install_regal; fi
-        if has_group web; then install_elm; fi
+        if has_group web; then install_haxe; install_elm; fi
         if has_group nix; then install_nixd; fi
 
+        verify_ocaml_lsp
+        verify_lsp_paths
         verify_fpc
         rm -rf .uv-cache
 
@@ -656,7 +886,26 @@ runs:
       shell: bash
       run: df -h
 
+    - name: Check formatting
+      if: inputs.shard-name == 'lint-type'
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv run poe lint
+
+    - name: Type-check with mypy
+      if: inputs.shard-name == 'lint-type'
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv run poe type-check
+
     - name: Test with pytest
+      if: inputs.shard-name != 'lint-type'
       env:
         UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       shell: bash
