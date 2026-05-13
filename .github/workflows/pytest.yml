@@ -88,11 +88,15 @@ jobs:
 
   cpu:
     name: Tests on ${{ matrix.os }}
-    needs: detect-changes
+    needs: [detect-changes, lint]
     if: |
-      needs.detect-changes.outputs.src == 'true' ||
-      needs.detect-changes.outputs.tests == 'true' ||
-      needs.detect-changes.outputs.deps == 'true'
+      always() &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.src == 'true' ||
+        needs.detect-changes.outputs.tests == 'true' ||
+        needs.detect-changes.outputs.deps == 'true'
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
