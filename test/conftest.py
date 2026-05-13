@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 @pytest.fixture(scope="session")
 def resources_dir() -> Path:
-    """Path to the test resources directory."""
+    """Path to the test resources directory used by integration fixtures."""
     current_dir = Path(__file__).parent
     return current_dir / "resources"
 
