@@ -25,7 +25,7 @@ runs:
   steps:
     - name: Detect core file changes
       id: core
-      uses: tj-actions/changed-files@v46
+      uses: tj-actions/changed-files@v47.0.6
       with:
         files: |
           src/solidlsp/*.py
@@ -37,7 +37,7 @@ runs:
 
     - name: Detect language server file changes
       id: ls-files
-      uses: tj-actions/changed-files@v46
+      uses: tj-actions/changed-files@v47.0.6
       with:
         files: src/solidlsp/language_servers/**/*.py
 
