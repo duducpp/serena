@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Cache uv virtualenv
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: .venv
           key: uv-venv-ubuntu-latest-3.11-lock-${{ hashFiles('uv.lock') }}
@@ -128,14 +128,28 @@ jobs:
         shell: bash
         run: |
           mkdir -p $HOME/.serena/language_servers/static
+          mkdir -p $HOME/.serena/language_servers/lua
           mkdir -p $HOME/.cache/go-build
           mkdir -p $HOME/go/bin
+          mkdir -p $HOME/bin
+          echo "$HOME/bin" >> $GITHUB_PATH
+      - name: Restore managed language server cache
+        id: restore-language-servers
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.serena/language_servers/static
+            ~/.serena/language_servers/lua
+          key: language-servers-${{ runner.os }}-${{ runner.arch }}-v2
+          restore-keys: |
+            language-servers-${{ runner.os }}-${{ runner.arch }}-
+            language-servers-${{ runner.os }}-
       - name: Install uv
         shell: bash
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Cache uv virtualenv
         id: cache-uv
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: .venv
           key: uv-venv-${{ runner.os }}-${{ matrix.python-version }}-lock-${{ hashFiles('uv.lock') }}
@@ -156,7 +170,7 @@ jobs:
       # Writing to this file adds the directory to the PATH for subsequent steps
       - name: Cache Go binaries
         id: cache-go-binaries
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/bin
@@ -260,7 +274,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'swift')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.swiftly
           key: swiftly-macos-6.1.2
@@ -294,7 +308,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'swift')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/swiftly
           key: swiftly-linux-6.1.2
@@ -378,7 +392,7 @@ jobs:
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'r')
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/R
           key: r-packages-${{ runner.os }}-4.4.2-languageserver-v1
@@ -403,7 +417,7 @@ jobs:
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'julia')
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.julia
           key: julia-${{ runner.os }}-1.12.6-LanguageServer-5.0.0
@@ -455,7 +469,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'haskell')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cabal/packages
@@ -484,30 +498,54 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.14.1
+      - name: Cache ZLS binary
+        if: |
+          needs.detect-changes.outputs.core-changed == 'true' ||
+          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
+        uses: actions/cache@v5
+        with:
+          path: ~/bin/zls*
+          key: zls-${{ runner.os }}-${{ runner.arch }}-0.14.0
       - name: Install ZLS (Zig Language Server)
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
         shell: bash
         run: |
+          if command -v zls &> /dev/null; then
+            echo "zls already available: $(command -v zls)"
+            exit 0
+          fi
+
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             wget https://github.com/zigtools/zls/releases/download/0.14.0/zls-x86_64-linux.tar.xz
             tar -xf zls-x86_64-linux.tar.xz
-            sudo mv zls /usr/local/bin/
+            mv zls "$HOME/bin/"
             rm zls-x86_64-linux.tar.xz
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            wget https://github.com/zigtools/zls/releases/download/0.14.0/zls-x86_64-macos.tar.xz
-            tar -xf zls-x86_64-macos.tar.xz
-            sudo mv zls /usr/local/bin/
-            rm zls-x86_64-macos.tar.xz
+            if [[ "${{ runner.arch }}" == "ARM64" ]]; then
+              ZLS_MACOS_ARCH="aarch64"
+            else
+              ZLS_MACOS_ARCH="x86_64"
+            fi
+            wget "https://github.com/zigtools/zls/releases/download/0.14.0/zls-${ZLS_MACOS_ARCH}-macos.tar.xz"
+            tar -xf "zls-${ZLS_MACOS_ARCH}-macos.tar.xz"
+            mv zls "$HOME/bin/"
+            rm "zls-${ZLS_MACOS_ARCH}-macos.tar.xz"
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             curl -L -o zls.zip https://github.com/zigtools/zls/releases/download/0.14.0/zls-x86_64-windows.zip
             unzip -o zls.zip
-            mkdir -p "$HOME/bin"
             mv zls.exe "$HOME/bin/"
-            echo "$HOME/bin" >> $GITHUB_PATH
             rm zls.zip
           fi
+      - name: Cache verible-verilog-ls binary
+        if: |
+          needs.detect-changes.outputs.core-changed == 'true' ||
+          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'systemverilog')
+        uses: actions/cache@v5
+        with:
+          path: ~/bin/verible-verilog-ls*
+          key: verible-verilog-ls-${{ runner.os }}-${{ runner.arch }}-v0.0-4051-g9fdb4057
       - name: Install verible-verilog-ls (SystemVerilog Language Server)
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
@@ -516,22 +554,25 @@ jobs:
         run: |
           VERIBLE_VERSION="v0.0-4051-g9fdb4057"
 
+          if command -v verible-verilog-ls &> /dev/null; then
+            echo "verible-verilog-ls already available: $(command -v verible-verilog-ls)"
+            exit 0
+          fi
+
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             wget https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz
             tar -xzf verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz
-            sudo mv verible-${VERIBLE_VERSION}/bin/verible-verilog-ls /usr/local/bin/
+            mv verible-${VERIBLE_VERSION}/bin/verible-verilog-ls "$HOME/bin/"
             rm -rf verible-${VERIBLE_VERSION} verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
             wget https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz
             tar -xzf verible-${VERIBLE_VERSION}-macOS.tar.gz
-            sudo mv verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls /usr/local/bin/
+            mv verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls "$HOME/bin/"
             rm -rf verible-${VERIBLE_VERSION}-macOS verible-${VERIBLE_VERSION}-macOS.tar.gz
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             curl -L -o verible.zip https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-win64.zip
             unzip -o verible.zip
-            mkdir -p "$HOME/bin"
             mv verible-${VERIBLE_VERSION}-win64/verible-verilog-ls.exe "$HOME/bin/"
-            echo "$HOME/bin" >> $GITHUB_PATH
             rm -rf verible-${VERIBLE_VERSION}-win64 verible.zip
           fi
 
@@ -552,43 +593,44 @@ jobs:
           LUA_LS_DIR="$HOME/.serena/language_servers/lua"
           mkdir -p "$LUA_LS_DIR"
 
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            if [[ "$(uname -m)" == "x86_64" ]]; then
-              wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz
-              tar -xzf lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz -C "$LUA_LS_DIR"
-            else
-              wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-arm64.tar.gz
-              tar -xzf lua-language-server-${LUA_LS_VERSION}-linux-arm64.tar.gz -C "$LUA_LS_DIR"
+          if [[ -x "$LUA_LS_DIR/bin/lua-language-server" ]] || [[ -x "$LUA_LS_DIR/bin/lua-language-server.exe" ]]; then
+            echo "Lua Language Server already available in $LUA_LS_DIR"
+          else
+            if [[ "${{ runner.os }}" == "Linux" ]]; then
+              if [[ "$(uname -m)" == "x86_64" ]]; then
+                wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz
+                tar -xzf lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz -C "$LUA_LS_DIR"
+              else
+                wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-arm64.tar.gz
+                tar -xzf lua-language-server-${LUA_LS_VERSION}-linux-arm64.tar.gz -C "$LUA_LS_DIR"
+              fi
+              chmod +x "$LUA_LS_DIR/bin/lua-language-server"
+              rm lua-language-server-*.tar.gz
+            elif [[ "${{ runner.os }}" == "macOS" ]]; then
+              if [[ "$(uname -m)" == "x86_64" ]]; then
+                wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-x64.tar.gz
+                tar -xzf lua-language-server-${LUA_LS_VERSION}-darwin-x64.tar.gz -C "$LUA_LS_DIR"
+              else
+                wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-arm64.tar.gz
+                tar -xzf lua-language-server-${LUA_LS_VERSION}-darwin-arm64.tar.gz -C "$LUA_LS_DIR"
+              fi
+              chmod +x "$LUA_LS_DIR/bin/lua-language-server"
+              rm lua-language-server-*.tar.gz
+            elif [[ "${{ runner.os }}" == "Windows" ]]; then
+              curl -L -o lua-ls.zip https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-win32-x64.zip
+              unzip -o lua-ls.zip -d "$LUA_LS_DIR"
+              rm lua-ls.zip
             fi
-            chmod +x "$LUA_LS_DIR/bin/lua-language-server"
-            # Create wrapper script instead of symlink to ensure supporting files are found
-            echo '#!/bin/bash' | sudo tee /usr/local/bin/lua-language-server > /dev/null
-            echo 'cd "${HOME}/.serena/language_servers/lua/bin"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
-            echo 'exec ./lua-language-server "$@"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
-            sudo chmod +x /usr/local/bin/lua-language-server
-            rm lua-language-server-*.tar.gz
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            if [[ "$(uname -m)" == "x86_64" ]]; then
-              wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-x64.tar.gz
-              tar -xzf lua-language-server-${LUA_LS_VERSION}-darwin-x64.tar.gz -C "$LUA_LS_DIR"
-            else
-              wget https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-arm64.tar.gz
-              tar -xzf lua-language-server-${LUA_LS_VERSION}-darwin-arm64.tar.gz -C "$LUA_LS_DIR"
-            fi
-            chmod +x "$LUA_LS_DIR/bin/lua-language-server"
-            # Create wrapper script instead of symlink to ensure supporting files are found
-            echo '#!/bin/bash' | sudo tee /usr/local/bin/lua-language-server > /dev/null
-            echo 'cd "${HOME}/.serena/language_servers/lua/bin"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
-            echo 'exec ./lua-language-server "$@"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
-            sudo chmod +x /usr/local/bin/lua-language-server
-            rm lua-language-server-*.tar.gz
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            curl -L -o lua-ls.zip https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-win32-x64.zip
-            unzip -o lua-ls.zip -d "$LUA_LS_DIR"
-            # For Windows, we'll add the bin directory directly to PATH
-            # The lua-language-server.exe can find its supporting files relative to its location
+          fi
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "$LUA_LS_DIR/bin" >> $GITHUB_PATH
-            rm lua-ls.zip
+          else
+            # Create wrapper script instead of symlink to ensure supporting files are found
+            echo '#!/bin/bash' | sudo tee /usr/local/bin/lua-language-server > /dev/null
+            echo 'cd "${HOME}/.serena/language_servers/lua/bin"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
+            echo 'exec ./lua-language-server "$@"' | sudo tee -a /usr/local/bin/lua-language-server > /dev/null
+            sudo chmod +x /usr/local/bin/lua-language-server
           fi
       - name: Cache Perl modules
         id: cache-perl
@@ -597,7 +639,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'perl')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/perl5
           key: perl-${{ runner.os }}-languageserver-v1
@@ -709,6 +751,14 @@ jobs:
         run: |
           # Verify the flake builds successfully
           nix build --no-link
+      - name: Cache Regal binary
+        if: |
+          needs.detect-changes.outputs.core-changed == 'true' ||
+          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'rego')
+        uses: actions/cache@v5
+        with:
+          path: ~/bin/regal*
+          key: regal-${{ runner.os }}-${{ runner.arch }}-0.39.0
       - name: Install Regal (Rego Language Server)
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
@@ -717,6 +767,11 @@ jobs:
         run: |
           REGAL_VERSION="0.39.0"
 
+          if command -v regal &> /dev/null; then
+            echo "regal already available: $(command -v regal)"
+            exit 0
+          fi
+
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             if [[ "$(uname -m)" == "x86_64" ]]; then
               curl -L -o regal https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Linux_x86_64
@@ -724,7 +779,7 @@ jobs:
               curl -L -o regal https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Linux_arm64
             fi
             chmod +x regal
-            sudo mv regal /usr/local/bin/
+            mv regal "$HOME/bin/"
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
             if [[ "$(uname -m)" == "x86_64" ]]; then
               curl -L -o regal https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_x86_64
@@ -732,12 +787,10 @@ jobs:
               curl -L -o regal https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_arm64
             fi
             chmod +x regal
-            sudo mv regal /usr/local/bin/
+            mv regal "$HOME/bin/"
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             curl -L -o regal.exe https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Windows_x86_64.exe
-            mkdir -p "$HOME/bin"
             mv regal.exe "$HOME/bin/"
-            echo "$HOME/bin" >> $GITHUB_PATH
           fi
       - name: Cache FPC (macOS)
         id: cache-fpc-macos
@@ -746,7 +799,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'pascal')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/fpcsrc
           key: fpc-macos-3.2.2
@@ -757,7 +810,7 @@ jobs:
             needs.detect-changes.outputs.core-changed == 'true' ||
             contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'pascal')
           )
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/fpc
@@ -884,25 +937,29 @@ jobs:
         uses: leanprover/lean-action@v1
         with:
           lake-package-directory: test/resources/repos/lean4/test_repo
-      - name: Install npm deps for Angular test repo
+      - name: Cache Angular test repo node_modules
+        id: cache-angular-node-modules
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'angular') ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'typescript')
+        uses: actions/cache@v5
+        with:
+          path: test/resources/repos/angular/test_repo/node_modules
+          key: angular-test-node-modules-${{ runner.os }}-${{ hashFiles('test/resources/repos/angular/test_repo/package-lock.json') }}
+      - name: Install npm deps for Angular test repo
+        if: |
+          steps.cache-angular-node-modules.outputs.cache-hit != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'angular') ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'typescript')
+          )
         shell: bash
         run: |
           if [ -d test/resources/repos/angular/test_repo ]; then
             cd test/resources/repos/angular/test_repo
             npm install --no-audit --no-fund --loglevel=warn
           fi
-      - name: Cache language servers
-        id: cache-language-servers
-        uses: actions/cache@v3
-        with:
-          path: ~/.serena/language_servers/static
-          key: language-servers-${{ runner.os }}-v1
-          restore-keys: |
-            language-servers-${{ runner.os }}-
       - name: Report free disk space
         if: runner.os == 'Linux'
         run: |
@@ -921,3 +978,21 @@ jobs:
             # targeted run: only changed language test directories
             uv run pytest $TEST_PATHS -q --tb=short
           fi
+      - name: Check managed language server cache content
+        id: managed-language-server-cache
+        if: always()
+        shell: bash
+        run: |
+          if find "$HOME/.serena/language_servers/static" "$HOME/.serena/language_servers/lua" -mindepth 1 -print -quit | grep -q .; then
+            echo "has-files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-files=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Save managed language server cache
+        if: always() && steps.restore-language-servers.outputs.cache-hit != 'true' && steps.managed-language-server-cache.outputs.has-files == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.serena/language_servers/static
+            ~/.serena/language_servers/lua
+          key: ${{ steps.restore-language-servers.outputs.cache-primary-key }}
