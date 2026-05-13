@@ -973,10 +973,10 @@ jobs:
 
           if [[ "$CORE_CHANGED" == "true" ]] || [[ -z "$TEST_PATHS" ]]; then
             # core changed or no specific paths: run full suite
-            uv run pytest test -q --tb=short
+            uv run pytest test -v --tb=short
           else
             # targeted run: only changed language test directories
-            uv run pytest $TEST_PATHS -q --tb=short
+            uv run pytest $TEST_PATHS -v --tb=short
           fi
       - name: Check managed language server cache content
         id: managed-language-server-cache
