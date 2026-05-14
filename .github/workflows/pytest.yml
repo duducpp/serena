@@ -124,6 +124,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ">=1.17.0"
+          cache: false
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -179,11 +180,11 @@ jobs:
           path: |
             ~/go/bin
             ~/.cache/go-build
-          key: go-binaries-${{ runner.os }}-gopls-latest
+          key: go-binaries-${{ runner.os }}-${{ runner.arch }}-gopls-v0.21.1
       - name: Install gopls
         if: steps.cache-go-binaries.outputs.cache-hit != 'true'
         shell: bash
-        run: go install golang.org/x/tools/gopls@latest
+        run: go install golang.org/x/tools/gopls@v0.21.1
       - name: Set up Elixir
         if: |
           runner.os != 'Windows' && (
@@ -296,7 +297,7 @@ jobs:
             echo "=== Installing swiftly on macOS ==="
             curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg && \
             installer -pkg swiftly.pkg -target CurrentUserHomeDirectory && \
-            ~/.swiftly/bin/swiftly init --quiet-shell-followup && \
+            ~/.swiftly/bin/swiftly init --quiet-shell-followup --skip-install && \
             . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh" && \
             hash -r
             swiftly install --use 6.1.2
@@ -330,7 +331,7 @@ jobs:
             sudo apt-get -y install libcurl4-openssl-dev
             curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
             tar zxf swiftly-$(uname -m).tar.gz && \
-            ./swiftly init --quiet-shell-followup && \
+            ./swiftly init --quiet-shell-followup --skip-install && \
             . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" && \
             hash -r
             swiftly install --use 6.1.2
@@ -391,6 +392,14 @@ jobs:
           )
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y libuv1-dev
+      - name: Configure R package library
+        if: |
+          needs.detect-changes.outputs.core-changed == 'true' ||
+          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'r')
+        shell: bash
+        run: |
+          echo "R_LIBS_USER=$HOME/.cache/R/library" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.cache/R/library"
       - name: Cache R packages
         id: cache-r-packages
         if: |
@@ -398,8 +407,8 @@ jobs:
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'r')
         uses: actions/cache@v5
         with:
-          path: ~/R
-          key: r-packages-${{ runner.os }}-4.4.2-languageserver-v1
+          path: ~/.cache/R/library
+          key: r-packages-${{ runner.os }}-4.4.2-languageserver-v2
       - name: Install R language server
         if: |
           steps.cache-r-packages.outputs.cache-hit != 'true' && (
@@ -408,7 +417,13 @@ jobs:
           )
         shell: bash
         run: |
-          Rscript -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages('languageserver', lib=Sys.getenv('R_LIBS_USER'), repos='https://cloud.r-project.org')"
+      - name: Verify R language server
+        if: |
+          needs.detect-changes.outputs.core-changed == 'true' ||
+          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'r')
+        shell: bash
+        run: Rscript -e "library(languageserver)"
       - name: Set up Julia
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
@@ -502,18 +517,37 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.14.1
-      - name: Cache ZLS binary
+      - name: Check ZLS binary
+        id: check-zls-binary
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
+        shell: bash
+        run: |
+          if command -v zls > /dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "zls already available: $(command -v zls)"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache ZLS binary
+        id: cache-zls-binary
+        if: |
+          steps.check-zls-binary.outputs.available != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
+          )
         uses: actions/cache@v5
         with:
           path: ~/bin/zls*
           key: zls-${{ runner.os }}-${{ runner.arch }}-0.14.0
       - name: Install ZLS (Zig Language Server)
         if: |
-          needs.detect-changes.outputs.core-changed == 'true' ||
-          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
+          steps.check-zls-binary.outputs.available != 'true' &&
+          steps.cache-zls-binary.outputs.cache-hit != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'zig')
+          )
         shell: bash
         run: |
           if command -v zls &> /dev/null; then
@@ -542,18 +576,37 @@ jobs:
             mv zls.exe "$HOME/bin/"
             rm zls.zip
           fi
-      - name: Cache verible-verilog-ls binary
+      - name: Check verible-verilog-ls binary
+        id: check-verible-binary
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'systemverilog')
+        shell: bash
+        run: |
+          if command -v verible-verilog-ls > /dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "verible-verilog-ls already available: $(command -v verible-verilog-ls)"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache verible-verilog-ls binary
+        id: cache-verible-binary
+        if: |
+          steps.check-verible-binary.outputs.available != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'systemverilog')
+          )
         uses: actions/cache@v5
         with:
           path: ~/bin/verible-verilog-ls*
           key: verible-verilog-ls-${{ runner.os }}-${{ runner.arch }}-v0.0-4051-g9fdb4057
       - name: Install verible-verilog-ls (SystemVerilog Language Server)
         if: |
-          needs.detect-changes.outputs.core-changed == 'true' ||
-          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'systemverilog')
+          steps.check-verible-binary.outputs.available != 'true' &&
+          steps.cache-verible-binary.outputs.cache-hit != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'systemverilog')
+          )
         shell: bash
         run: |
           VERIBLE_VERSION="v0.0-4051-g9fdb4057"
@@ -755,18 +808,37 @@ jobs:
         run: |
           # Verify the flake builds successfully
           nix build --no-link
-      - name: Cache Regal binary
+      - name: Check Regal binary
+        id: check-regal-binary
         if: |
           needs.detect-changes.outputs.core-changed == 'true' ||
           contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'rego')
+        shell: bash
+        run: |
+          if command -v regal > /dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "regal already available: $(command -v regal)"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache Regal binary
+        id: cache-regal-binary
+        if: |
+          steps.check-regal-binary.outputs.available != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'rego')
+          )
         uses: actions/cache@v5
         with:
           path: ~/bin/regal*
           key: regal-${{ runner.os }}-${{ runner.arch }}-0.39.0
       - name: Install Regal (Rego Language Server)
         if: |
-          needs.detect-changes.outputs.core-changed == 'true' ||
-          contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'rego')
+          steps.check-regal-binary.outputs.available != 'true' &&
+          steps.cache-regal-binary.outputs.cache-hit != 'true' && (
+            needs.detect-changes.outputs.core-changed == 'true' ||
+            contains(fromJSON(needs.detect-changes.outputs.language-ids || '[]'), 'rego')
+          )
         shell: bash
         run: |
           REGAL_VERSION="0.39.0"
