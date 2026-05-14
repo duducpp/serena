@@ -261,12 +261,14 @@ runs:
         lake-package-directory: test/resources/repos/lean4/test_repo
 
     - name: Install guarded shard tools
+      env:
+        SHARD_TOOLS: ${{ inputs.shard-tools }}
       shell: bash
       run: |
         set -euo pipefail
 
         has_group() {
-          [[ " ${{ inputs.shard-tools }} " == *" $1 "* ]]
+          [[ " ${SHARD_TOOLS} " == *" $1 "* ]]
         }
 
         ensure_windows_action_paths() {
