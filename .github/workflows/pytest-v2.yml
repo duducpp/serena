@@ -387,207 +387,263 @@ jobs:
         with:
           lake-package-directory: test/resources/repos/lean4/test_repo
 
-      - name: Install guarded shard tools
+      - name: Setup Windows action paths
+        if: runner.os == 'Windows' && (contains(matrix.shard.tools, 'lean') || contains(matrix.shard.tools, 'ocaml'))
         env:
           SHARD_TOOLS: ${{ matrix.shard.tools }}
         shell: bash
         run: |
           set -euo pipefail
+          has_group() { [[ " ${SHARD_TOOLS} " == *" $1 "* ]]; }
+          ci_bin="${RUNNER_TEMP:-$HOME}/ci-bin"
+          ci_bin=$(cygpath -u "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          ci_bin_win=$(cygpath -w "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          mkdir -p "$ci_bin"
 
-          has_group() {
-            [[ " ${SHARD_TOOLS} " == *" $1 "* ]]
-          }
-
-          ensure_windows_rscript_path() {
-            if [[ "$RUNNER_OS" != "Windows" ]] || command -v Rscript >/dev/null 2>&1; then
-              return
+          if has_group lean; then
+            lean_bin=$(find /c/Users/runneradmin/.elan /c/Users/runneradmin -iname "lean.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$lean_bin" ]]; then
+              echo "Could not locate lean.exe after leanprover/lean-action" >&2
+              exit 1
             fi
-
-            local rscript
-            rscript=$(find /c/R "/c/Program Files/R" /c/hostedtoolcache/windows/R -iname "Rscript.exe" -type f 2>/dev/null | head -1 || true)
-            if [[ -z "$rscript" ]]; then
-              echo "Could not locate Rscript.exe after r-lib/actions/setup-r" >&2
-              return 127
-            fi
-
-            PATH="$(dirname "$rscript"):$PATH"
-            export PATH
-          }
-
-          ensure_windows_julia_path() {
-            if [[ "$RUNNER_OS" != "Windows" ]] || command -v julia >/dev/null 2>&1; then
-              return
-            fi
-
-            local julia_bin
-            julia_bin=$(find /c/hostedtoolcache/windows/julia -iname "julia.exe" -type f 2>/dev/null | head -1 || true)
-            if [[ -z "$julia_bin" ]]; then
-              echo "Could not locate julia.exe after julia-actions/setup-julia" >&2
-              return 127
-            fi
-
-            PATH="$(dirname "$julia_bin"):$PATH"
-            export PATH
-          }
-
-          ensure_windows_action_paths() {
-            if [[ "$RUNNER_OS" != "Windows" ]]; then
-              return
-            fi
-
-            local ci_bin ci_bin_win
-            ci_bin="${RUNNER_TEMP:-$HOME}/ci-bin"
-            ci_bin=$(cygpath -u "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
-            ci_bin_win=$(cygpath -w "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
-            mkdir -p "$ci_bin"
-
-            if has_group lean; then
-              local lean_bin
-              lean_bin=$(find /c/Users/runneradmin/.elan /c/Users/runneradmin -iname "lean.exe" -type f 2>/dev/null | head -1 || true)
-              if [[ -z "$lean_bin" ]]; then
-                echo "Could not locate lean.exe after leanprover/lean-action" >&2
-                return 1
+            lean_bin=$(dirname "$lean_bin")
+            for tool in elan lake lean; do
+              if [[ -x "$lean_bin/$tool.exe" ]]; then
+                printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$lean_bin/$tool.exe" > "$ci_bin/$tool"
+                printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$lean_bin/$tool.exe")" > "$ci_bin/$tool.cmd"
+                chmod +x "$ci_bin/$tool"
               fi
-              lean_bin=$(dirname "$lean_bin")
-              for tool in elan lake lean; do
-                if [[ -x "$lean_bin/$tool.exe" ]]; then
-                  printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$lean_bin/$tool.exe" > "$ci_bin/$tool"
-                  printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$lean_bin/$tool.exe")" > "$ci_bin/$tool.cmd"
-                  chmod +x "$ci_bin/$tool"
-                fi
-              done
-              export PATH="$ci_bin:$lean_bin:$PATH"
-              echo "$ci_bin_win" >> "$GITHUB_PATH"
-              echo "$(cygpath -w "$lean_bin")" >> "$GITHUB_PATH"
-            fi
+            done
+            export PATH="$ci_bin:$lean_bin:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$lean_bin")" >> "$GITHUB_PATH"
+          fi
 
-            if has_group ocaml; then
-              local opam_exe opam_dir opam_windows_path
-              if [[ -n "${OPAM_EXE:-}" ]]; then
-                opam_exe=$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")
+          if has_group ocaml; then
+            opam_exe=""
+            opam_windows_path=""
+            if [[ -n "${OPAM_EXE:-}" ]]; then
+              opam_exe=$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")
+            else
+              opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
+              if [[ -n "$opam_windows_path" ]]; then
+                opam_exe=$(cygpath -u "$opam_windows_path")
               else
-                opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
-                if [[ -n "$opam_windows_path" ]]; then
-                  opam_exe=$(cygpath -u "$opam_windows_path")
-                else
-                  opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
-                fi
+                opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
               fi
-              if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe ]]; then
-                opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe
-              fi
-              if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe ]]; then
-                opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe
-              fi
-              if [[ -z "$opam_exe" && -d /c/hostedtoolcache/windows/opam ]]; then
-                opam_exe=$(find /c/hostedtoolcache/windows/opam -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
-              fi
-              if [[ -n "$opam_exe" && -f "$opam_exe" ]]; then
-                :
-              else
-                opam_exe=""
-              fi
-              if [[ -z "$opam_exe" ]]; then
-                echo "Could not locate opam.exe after ocaml/setup-ocaml" >&2
-                return 1
-              fi
-              opam_dir=$(dirname "$opam_exe")
-              printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$opam_exe" > "$ci_bin/opam"
-              printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$opam_exe")" > "$ci_bin/opam.cmd"
-              chmod +x "$ci_bin/opam"
-              export PATH="$ci_bin:$opam_dir:$PATH"
-              echo "$ci_bin_win" >> "$GITHUB_PATH"
-              echo "$(cygpath -w "$opam_dir")" >> "$GITHUB_PATH"
             fi
-          }
+            if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe ]]; then
+              opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe
+            fi
+            if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe ]]; then
+              opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe
+            fi
+            if [[ -z "$opam_exe" && -d /c/hostedtoolcache/windows/opam ]]; then
+              opam_exe=$(find /c/hostedtoolcache/windows/opam -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+            fi
+            if [[ -z "$opam_exe" || ! -f "$opam_exe" ]]; then
+              echo "Could not locate opam.exe after ocaml/setup-ocaml" >&2
+              exit 1
+            fi
+            opam_dir=$(dirname "$opam_exe")
+            printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$opam_exe" > "$ci_bin/opam"
+            printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$opam_exe")" > "$ci_bin/opam.cmd"
+            chmod +x "$ci_bin/opam"
+            export PATH="$ci_bin:$opam_dir:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$opam_dir")" >> "$GITHUB_PATH"
+          fi
 
+      - name: Install gopls
+        if: contains(matrix.shard.tools, 'go')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gopls >/dev/null 2>&1; then
+            go install golang.org/x/tools/gopls@latest
+          fi
+          gopls version
+
+      - name: Install ruby-lsp
+        if: contains(matrix.shard.tools, 'ruby')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ruby-lsp >/dev/null 2>&1; then
+            gem install ruby-lsp
+          fi
+          ruby-lsp --version || true
+
+      - name: Install ccls
+        if: contains(matrix.shard.tools, 'compiled_cpp')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ccls >/dev/null 2>&1; then
+            ccls --version 2>&1 | head -1 || true
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ccls
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install ccls
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            choco install ccls -y
+          fi
+          command -v ccls >/dev/null
+
+      - name: Install zls
+        if: contains(matrix.shard.tools, 'compiled_cpp')
+        shell: bash
+        run: |
+          set -euo pipefail
           download_with_retry() {
-            local url="$1"
-            local output="$2"
+            local url="$1" output="$2"
             for attempt in 1 2 3 4 5; do
-              if curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url"; then
-                return 0
-              fi
+              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
               echo "Download failed for $url on attempt $attempt"
               sleep $((attempt * 10))
             done
             return 1
           }
+          if command -v zls >/dev/null 2>&1; then
+            zls --version || true
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz" zls-x86_64-linux.tar.xz
+            tar -xf zls-x86_64-linux.tar.xz
+            mv zls "$HOME/bin/"
+            rm zls-x86_64-linux.tar.xz
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-macos.tar.xz" zls-x86_64-macos.tar.xz
+            tar -xf zls-x86_64-macos.tar.xz
+            mv zls "$HOME/bin/"
+            rm zls-x86_64-macos.tar.xz
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o zls.zip "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-windows.zip"
+            unzip -o zls.zip
+            mv zls.exe "$HOME/bin/"
+            rm zls.zip
+          fi
 
-          install_gopls() {
-            if ! command -v gopls >/dev/null 2>&1; then
-              go install golang.org/x/tools/gopls@latest
-            fi
-            gopls version
+      - name: Install Verible
+        if: contains(matrix.shard.tools, 'compiled_cpp')
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_with_retry() {
+            local url="$1" output="$2"
+            for attempt in 1 2 3 4 5; do
+              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
+              echo "Download failed for $url on attempt $attempt"
+              sleep $((attempt * 10))
+            done
+            return 1
           }
+          if command -v verible-verilog-ls >/dev/null 2>&1; then
+            exit 0
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+            tar -xzf "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+            mv "verible-${VERIBLE_VERSION}/bin/verible-verilog-ls" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+            tar -xzf "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+            mv "verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}-macOS" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o verible.zip "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-win64.zip"
+            unzip -o verible.zip
+            mv "verible-${VERIBLE_VERSION}-win64/verible-verilog-ls.exe" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}-win64" verible.zip
+          fi
+          command -v verible-verilog-ls >/dev/null
 
-          install_ruby_lsp() {
-            if ! command -v ruby-lsp >/dev/null 2>&1; then
-              gem install ruby-lsp
-            fi
-            ruby-lsp --version || true
-          }
-
-          install_ccls() {
-            if command -v ccls >/dev/null 2>&1; then
-              ccls --version 2>&1 | head -1 || true
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
+      - name: Install FPC
+        if: contains(matrix.shard.tools, 'compiled_cpp')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            if ! command -v fpc >/dev/null 2>&1; then
               sudo apt-get update
-              sudo apt-get install -y ccls
-            elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              brew install ccls
-            elif [[ "$RUNNER_OS" == "Windows" ]]; then
-              choco install ccls -y
+              sudo apt-get install -y fpc fpc-source
             fi
-            command -v ccls >/dev/null
-          }
+            fpcdir=$(ls -d /usr/share/fpcsrc/*/ 2>/dev/null | head -1 | sed 's:/$::')
+            [[ -z "$fpcdir" ]] && fpcdir="/usr/share/fpcsrc"
+            export PP="/usr/bin/fpc"
+            export FPCDIR="$fpcdir"
+            echo "PP=/usr/bin/fpc" >> "$GITHUB_ENV"
+            echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            if ! command -v fpc >/dev/null 2>&1; then
+              brew install fpc
+            fi
+            if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
+              curl -L -o fpc-source.tar.gz "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.tar.gz/download"
+              mkdir -p "$HOME/fpcsrc"
+              tar -xzf fpc-source.tar.gz -C "$HOME/fpcsrc"
+              rm fpc-source.tar.gz
+            fi
+            fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}"
+            [[ -d "$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}/rtl" ]] && fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}"
+            PP="$(command -v fpc)"
+            export PP
+            export FPCDIR="$fpcdir"
+            echo "PP=$PP" >> "$GITHUB_ENV"
+            echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [[ ! -d "$HOME/fpc" ]]; then
+              curl -L -o fpc-ootb.zip "https://github.com/fredvs/freepascal-ootb/releases/download/${FPC_VERSION}/fpc-ootb-322-x86_64-win64.zip"
+              mkdir -p "$HOME/fpc"
+              unzip -q fpc-ootb.zip -d "$HOME/fpc"
+              rm fpc-ootb.zip
+            fi
+            if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
+              curl -L -o fpc-source.zip "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.zip/download"
+              mkdir -p "$HOME/fpcsrc"
+              unzip -q fpc-source.zip -d "$HOME/fpcsrc"
+              rm fpc-source.zip
+            fi
+            fpc_exe=$(find "$HOME/fpc" -name "fpc-ootb-64.exe" -type f 2>/dev/null | head -1)
+            export PP="$fpc_exe"
+            export FPCDIR="$HOME/fpcsrc/fpc-${FPC_VERSION}"
+            echo "PP=$fpc_exe" >> "$GITHUB_ENV"
+            echo "FPCDIR=$HOME/fpcsrc/fpc-${FPC_VERSION}" >> "$GITHUB_ENV"
+            echo "$(dirname "$fpc_exe")" >> "$GITHUB_PATH"
+          fi
 
-          install_swift() {
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              return
-            fi
-            if command -v sourcekit-lsp >/dev/null 2>&1; then
-              sourcekit-lsp --help >/dev/null || true
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "macOS" ]]; then
-              curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
-              installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
-              ~/.swiftly/bin/swiftly init --quiet-shell-followup
-              . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-            else
-              sudo apt-get update
-              sudo apt-get -y install libcurl4-openssl-dev
-              curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
-              tar zxf "swiftly-$(uname -m).tar.gz"
-              ./swiftly init --quiet-shell-followup
-              . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-            fi
-
+      - name: Install Swift / sourcekit-lsp
+        if: contains(matrix.shard.tools, 'compiled_apple') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v sourcekit-lsp >/dev/null 2>&1; then
+            sourcekit-lsp --help >/dev/null || true
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+            installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+            ~/.swiftly/bin/swiftly init --quiet-shell-followup
+            . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
             swiftly install --use "$SWIFT_VERSION"
             swiftly use "$SWIFT_VERSION"
             sourcekit-lsp --help >/dev/null || true
-          }
+          else
+            sudo apt-get update
+            sudo apt-get -y install libcurl4-openssl-dev
+            curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+            tar zxf "swiftly-$(uname -m).tar.gz"
+            ./swiftly init --quiet-shell-followup
+            . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+            swiftly install --use "$SWIFT_VERSION"
+            swiftly use "$SWIFT_VERSION"
+            sourcekit-lsp --help >/dev/null || true
+          fi
 
-          install_ocaml_packages() {
-            # Ensure this shell sees the same opam switch/environment as setup-ocaml.
-            eval "$(run_opam env 2>/dev/null || true)"
-
-            if run_opam exec -- which ocamllsp >/dev/null 2>&1; then
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              run_opam install -y dune ocaml-lsp-server
-            else
-              run_opam install -y dune 'ocaml-lsp-server>=1.23.0'
-            fi
-          }
-
+      - name: Install OCaml packages
+        if: contains(matrix.shard.tools, 'ocaml')
+        shell: bash
+        run: |
+          set -euo pipefail
           run_opam() {
             if [[ -n "${OPAM_EXE:-}" && -f "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" ]]; then
               "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" "$@"
@@ -600,70 +656,33 @@ jobs:
               return 127
             fi
           }
-
-          verify_ocaml_lsp() {
-            if ! has_group ocaml; then
-              return
+          eval "$(run_opam env 2>/dev/null || true)"
+          if ! run_opam exec -- which ocamllsp >/dev/null 2>&1; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              run_opam install -y dune ocaml-lsp-server
+            else
+              run_opam install -y dune 'ocaml-lsp-server>=1.23.0'
             fi
+          fi
 
-            eval "$(run_opam env 2>/dev/null || true)"
-            run_opam exec -- which ocamllsp >/dev/null
-            run_opam exec -- ocamllsp --version >/dev/null
-          }
-
-          verify_lsp_paths() {
-            if has_group go; then
-              command -v gopls >/dev/null
-              gopls version >/dev/null 2>&1 || true
+      - name: Install R language server
+        if: contains(matrix.shard.tools, 'data')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]] && ! command -v Rscript >/dev/null 2>&1; then
+            rscript=$(find /c/R "/c/Program Files/R" /c/hostedtoolcache/windows/R -iname "Rscript.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$rscript" ]]; then
+              echo "Could not locate Rscript.exe after r-lib/actions/setup-r" >&2
+              exit 127
             fi
-
-            if has_group ruby; then
-              command -v ruby-lsp >/dev/null
-              ruby-lsp --version >/dev/null 2>&1 || true
-            fi
-
-            if has_group compiled || has_group compiled_cpp; then
-              command -v ccls >/dev/null
-              command -v zls >/dev/null
-              command -v verible-verilog-ls >/dev/null
-            fi
-
-            if has_group compiled || has_group compiled_apple; then
-              if [[ "$RUNNER_OS" != "Windows" ]]; then
-                command -v sourcekit-lsp >/dev/null
-              fi
-            fi
-
-            if has_group data; then
-              ensure_windows_rscript_path
-              Rscript -e "library(languageserver)" >/dev/null
-              ensure_windows_julia_path
-              julia -e "using LanguageServer" >/dev/null
-            fi
-
-            if has_group niche; then
-              command -v lua-language-server >/dev/null
-              if [[ "$RUNNER_OS" != "Windows" ]]; then
-                perl -MPerl::LanguageServer -e 1 >/dev/null
-                command -v regal >/dev/null
-              else
-                command -v regal.exe >/dev/null
-              fi
-            fi
-
-            if has_group nix && [[ "$RUNNER_OS" != "Windows" ]]; then
-              command -v nixd >/dev/null
-            fi
-          }
-
-          install_r_language_server() {
-            ensure_windows_rscript_path
-
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              sudo apt-get update
-              sudo apt-get install -y libuv1-dev pkg-config
-            fi
-
+            PATH="$(dirname "$rscript"):$PATH"
+            export PATH
+          fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libuv1-dev pkg-config
+          fi
           Rscript - <<'RSCRIPT'
           dir.create(Sys.getenv("R_LIBS_USER"), recursive = TRUE, showWarnings = FALSE)
           cran <- Sys.getenv("RSPM", Sys.getenv("CRAN", "https://cloud.r-project.org"))
@@ -685,93 +704,65 @@ jobs:
           }
           library(languageserver)
           RSCRIPT
+
+      - name: Install Julia language server
+        if: contains(matrix.shard.tools, 'data')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]] && ! command -v julia >/dev/null 2>&1; then
+            julia_bin=$(find /c/hostedtoolcache/windows/julia -iname "julia.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$julia_bin" ]]; then
+              echo "Could not locate julia.exe after julia-actions/setup-julia" >&2
+              exit 127
+            fi
+            PATH="$(dirname "$julia_bin"):$PATH"
+            export PATH
+          fi
+          julia -e 'using Pkg; try using LanguageServer catch; Pkg.add("LanguageServer"); using LanguageServer end'
+
+      - name: Build Haskell test repo
+        if: contains(matrix.shard.tools, 'haskell') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ghc --version
+          cabal --version
+          if command -v haskell-language-server-wrapper >/dev/null 2>&1; then
+            haskell-language-server-wrapper --version || true
+          elif command -v haskell-language-server >/dev/null 2>&1; then
+            haskell-language-server --version || true
+          fi
+          cd test/resources/repos/haskell/test_repo
+          cabal update
+          cabal build --only-dependencies
+          cabal build
+
+      - name: Install lua-language-server
+        if: contains(matrix.shard.tools, 'niche')
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_with_retry() {
+            local url="$1" output="$2"
+            for attempt in 1 2 3 4 5; do
+              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
+              echo "Download failed for $url on attempt $attempt"
+              sleep $((attempt * 10))
+            done
+            return 1
           }
-
-          install_julia_language_server() {
-            ensure_windows_julia_path
-            julia -e 'using Pkg; try using LanguageServer catch; Pkg.add("LanguageServer"); using LanguageServer end'
-          }
-
-          build_haskell_repo() {
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              return
-            fi
-            ghc --version
-            cabal --version
-            if command -v haskell-language-server-wrapper >/dev/null 2>&1; then
-              haskell-language-server-wrapper --version || true
-            elif command -v haskell-language-server >/dev/null 2>&1; then
-              haskell-language-server --version || true
-            fi
-            cd test/resources/repos/haskell/test_repo
-            cabal update
-            cabal build --only-dependencies
-            cabal build
-          }
-
-          install_zls() {
-            if command -v zls >/dev/null 2>&1; then
-              zls --version || true
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz" zls-x86_64-linux.tar.xz
-              tar -xf zls-x86_64-linux.tar.xz
-              mv zls "$HOME/bin/"
-              rm zls-x86_64-linux.tar.xz
-            elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-macos.tar.xz" zls-x86_64-macos.tar.xz
-              tar -xf zls-x86_64-macos.tar.xz
-              mv zls "$HOME/bin/"
-              rm zls-x86_64-macos.tar.xz
-            elif [[ "$RUNNER_OS" == "Windows" ]]; then
-              curl -L -o zls.zip "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-windows.zip"
-              unzip -o zls.zip
-              mv zls.exe "$HOME/bin/"
-              rm zls.zip
-            fi
-          }
-
-          install_verible() {
-            if command -v verible-verilog-ls >/dev/null 2>&1; then
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
-              tar -xzf "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
-              mv "verible-${VERIBLE_VERSION}/bin/verible-verilog-ls" "$HOME/bin/"
-              rm -rf "verible-${VERIBLE_VERSION}" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
-            elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
-              tar -xzf "verible-${VERIBLE_VERSION}-macOS.tar.gz"
-              mv "verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls" "$HOME/bin/"
-              rm -rf "verible-${VERIBLE_VERSION}-macOS" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
-            elif [[ "$RUNNER_OS" == "Windows" ]]; then
-              curl -L -o verible.zip "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-win64.zip"
-              unzip -o verible.zip
-              mv "verible-${VERIBLE_VERSION}-win64/verible-verilog-ls.exe" "$HOME/bin/"
-              rm -rf "verible-${VERIBLE_VERSION}-win64" verible.zip
-            fi
-            command -v verible-verilog-ls >/dev/null
-          }
-
-          install_lua_language_server() {
-            if command -v lua-language-server >/dev/null 2>&1; then
-              return
-            fi
-
-            local lua_ls_dir="$HOME/.serena/language_servers/lua"
+          if ! command -v lua-language-server >/dev/null 2>&1; then
+            lua_ls_dir="$HOME/.serena/language_servers/lua"
             mkdir -p "$lua_ls_dir"
             if [[ "$RUNNER_OS" == "Linux" ]]; then
-              local arch="x64"
+              arch="x64"
               [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
               download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
               tar -xzf "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" -C "$lua_ls_dir"
               rm "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
             elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              local arch="x64"
+              arch="x64"
               [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
               download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
               tar -xzf "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" -C "$lua_ls_dir"
@@ -781,7 +772,6 @@ jobs:
               unzip -o lua-ls.zip -d "$lua_ls_dir"
               rm lua-ls.zip
             fi
-
             chmod +x "$lua_ls_dir/bin/lua-language-server" 2>/dev/null || true
             if [[ "$RUNNER_OS" == "Windows" ]]; then
               cat > "$HOME/bin/lua-language-server" <<'EOF'
@@ -789,25 +779,22 @@ jobs:
           cd "${HOME}/.serena/language_servers/lua/bin"
           exec ./lua-language-server.exe "$@"
           EOF
-              chmod +x "$HOME/bin/lua-language-server"
             else
               cat > "$HOME/bin/lua-language-server" <<'EOF'
           #!/usr/bin/env bash
           cd "${HOME}/.serena/language_servers/lua/bin"
           exec ./lua-language-server "$@"
           EOF
-              chmod +x "$HOME/bin/lua-language-server"
             fi
-          }
+            chmod +x "$HOME/bin/lua-language-server"
+          fi
 
-          install_perl_language_server() {
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              return
-            fi
-            if perl -MPerl::LanguageServer -e 1 >/dev/null 2>&1; then
-              return
-            fi
-
+      - name: Install Perl language server
+        if: contains(matrix.shard.tools, 'niche') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! perl -MPerl::LanguageServer -e 1 >/dev/null 2>&1; then
             if [[ "$RUNNER_OS" == "Linux" ]]; then
               sudo apt-get update
               sudo apt-get install -y cpanminus build-essential libanyevent-perl libio-aio-perl
@@ -815,30 +802,63 @@ jobs:
               brew install cpanminus
             fi
             PERL_MM_USE_DEFAULT=1 cpanm --notest --force Perl::LanguageServer
+          fi
+
+      - name: Install Ansible tools
+        if: contains(matrix.shard.tools, 'niche')
+        shell: bash
+        run: uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv run pip install ansible-core ansible-lint
+
+      - name: Install Regal
+        if: contains(matrix.shard.tools, 'niche')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            rm -f "$HOME/bin/regal"
+            if command -v regal.exe >/dev/null 2>&1; then exit 0; fi
+          elif command -v regal >/dev/null 2>&1; then
+            exit 0
+          fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            arch="x86_64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Linux_${arch}"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            arch="x86_64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_${arch}"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o "$HOME/bin/regal.exe" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Windows_x86_64.exe"
+            chmod +x "$HOME/bin/regal.exe" 2>/dev/null || true
+          fi
+          chmod +x "$HOME/bin/regal" 2>/dev/null || true
+
+      - name: Install Haxe
+        if: contains(matrix.shard.tools, 'web')
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_with_retry() {
+            local url="$1" output="$2"
+            for attempt in 1 2 3 4 5; do
+              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
+              echo "Download failed for $url on attempt $attempt"
+              sleep $((attempt * 10))
+            done
+            return 1
           }
-
-          install_ansible_tools() {
-            uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv run pip install ansible-core ansible-lint
-          }
-
-          install_haxe() {
-            if command -v haxe >/dev/null 2>&1 && haxe -version | grep -q "^${HAXE_VERSION}$"; then
-              haxe -version
-              return
-            fi
-
-            if [[ "$RUNNER_OS" != "Linux" ]]; then
-              command -v haxe >/dev/null
-              haxe -version
-              return
-            fi
-
-            local haxe_root="$HOME/.serena/language_servers/static/haxe-${HAXE_VERSION}"
-            local neko_root="$HOME/.serena/language_servers/static/neko-2.4.0"
-            local haxe_archive="$RUNNER_TEMP/haxe-${HAXE_VERSION}-linux64.tar.gz"
-            local neko_archive="$RUNNER_TEMP/neko-2.4.0-linux64.tar.gz"
+          if command -v haxe >/dev/null 2>&1 && haxe -version | grep -q "^${HAXE_VERSION}$"; then
+            haxe -version
+          elif [[ "$RUNNER_OS" != "Linux" ]]; then
+            command -v haxe >/dev/null
+            haxe -version
+          else
+            haxe_root="$HOME/.serena/language_servers/static/haxe-${HAXE_VERSION}"
+            neko_root="$HOME/.serena/language_servers/static/neko-2.4.0"
+            haxe_archive="$RUNNER_TEMP/haxe-${HAXE_VERSION}-linux64.tar.gz"
+            neko_archive="$RUNNER_TEMP/neko-2.4.0-linux64.tar.gz"
             mkdir -p "$haxe_root" "$neko_root"
-
             if [[ ! -x "$haxe_root/haxe" || -z "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)" || -z "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)" ]]; then
               rm -rf "$haxe_root" "$neko_root"
               mkdir -p "$haxe_root" "$neko_root"
@@ -848,18 +868,13 @@ jobs:
               tar -xzf "$haxe_archive" -C "$haxe_root" --strip-components=1
               mkdir -p "$haxe_root/lib"
             fi
-
-            local neko_bin_dir
-            local neko_lib_dir
-            local neko_lib_path
             neko_bin_dir=$(dirname "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)")
             neko_lib_dir=$(dirname "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)")
             if [[ -z "$neko_bin_dir" || -z "$neko_lib_dir" ]]; then
               echo "Could not locate Neko runtime under $neko_root"
               find "$neko_root" -maxdepth 3 -type f | sort
-              return 1
+              exit 1
             fi
-
             neko_lib_path="$neko_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             export PATH="$haxe_root:$neko_bin_dir:$PATH"
             export LD_LIBRARY_PATH="$neko_lib_path"
@@ -868,159 +883,137 @@ jobs:
             echo "LD_LIBRARY_PATH=$neko_lib_path" >> "$GITHUB_ENV"
             haxelib setup "$haxe_root/lib"
             haxe -version
-          }
+          fi
 
-          install_elm() {
-          if command -v elm >/dev/null 2>&1 && elm --version | grep -q '^0\.19\.1$'; then
-              echo "Elm compiler already installed"
+      - name: Install Elm
+        if: contains(matrix.shard.tools, 'web')
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_with_retry() {
+            local url="$1" output="$2"
+            for attempt in 1 2 3 4 5; do
+              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
+              echo "Download failed for $url on attempt $attempt"
+              sleep $((attempt * 10))
+            done
+            return 1
+          }
+          if ! command -v elm >/dev/null 2>&1 || ! elm --version | grep -q '^0\.19\.1$'; then
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              asset="binary-for-linux-64-bit.gz"
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              [[ "$(uname -m)" == "arm64" ]] && asset="binary-for-mac-64-bit-ARM.gz" || asset="binary-for-mac-64-bit.gz"
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              asset="binary-for-windows-64-bit.gz"
+              output="$HOME/bin/elm.exe"
+            fi
+            download_with_retry "https://github.com/elm/compiler/releases/download/${ELM_VERSION}/${asset}" "$RUNNER_TEMP/$asset"
+            python -c 'import gzip, pathlib, sys; pathlib.Path(sys.argv[2]).write_bytes(gzip.open(sys.argv[1], "rb").read())' "$RUNNER_TEMP/$asset" "$output"
+            chmod +x "$output" 2>/dev/null || true
+          fi
+          elm --version
+          (cd test/resources/repos/elm/test_repo && elm make Main.elm --output="$RUNNER_TEMP/elm-test.js")
+
+      - name: Install nixd
+        if: contains(matrix.shard.tools, 'nix') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v nixd >/dev/null 2>&1; then
+            nix profile install github:nix-community/nixd
+          fi
+          command -v nixd >/dev/null
+          nix build --no-link
+
+      - name: Verify OCaml LSP
+        if: contains(matrix.shard.tools, 'ocaml')
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_opam() {
+            if [[ -n "${OPAM_EXE:-}" && -f "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" ]]; then
+              "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" "$@"
+            elif command -v opam >/dev/null 2>&1; then
+              opam "$@"
+            elif command -v opam.exe >/dev/null 2>&1; then
+              opam.exe "$@"
             else
-              local asset output
-              if [[ "$RUNNER_OS" == "Linux" ]]; then
-                asset="binary-for-linux-64-bit.gz"
-                output="$HOME/bin/elm"
-              elif [[ "$RUNNER_OS" == "macOS" ]]; then
-                if [[ "$(uname -m)" == "arm64" ]]; then
-                  asset="binary-for-mac-64-bit-ARM.gz"
-                else
-                  asset="binary-for-mac-64-bit.gz"
-                fi
-                output="$HOME/bin/elm"
-              elif [[ "$RUNNER_OS" == "Windows" ]]; then
-                asset="binary-for-windows-64-bit.gz"
-                output="$HOME/bin/elm.exe"
-              fi
-
-              download_with_retry "https://github.com/elm/compiler/releases/download/${ELM_VERSION}/${asset}" "$RUNNER_TEMP/$asset"
-              python -c 'import gzip, pathlib, sys; pathlib.Path(sys.argv[2]).write_bytes(gzip.open(sys.argv[1], "rb").read())' "$RUNNER_TEMP/$asset" "$output"
-              chmod +x "$output" 2>/dev/null || true
+              echo "opam is not available on PATH" >&2
+              return 127
             fi
-            elm --version
-            (cd test/resources/repos/elm/test_repo && elm make Main.elm --output="$RUNNER_TEMP/elm-test.js")
           }
+          eval "$(run_opam env 2>/dev/null || true)"
+          run_opam exec -- which ocamllsp >/dev/null
+          run_opam exec -- ocamllsp --version >/dev/null
 
-          install_nixd() {
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              return
+      - name: Verify LSP paths
+        env:
+          SHARD_TOOLS: ${{ matrix.shard.tools }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          has_group() { [[ " ${SHARD_TOOLS} " == *" $1 "* ]]; }
+
+          if has_group go; then
+            command -v gopls >/dev/null
+            gopls version >/dev/null 2>&1 || true
+          fi
+          if has_group ruby; then
+            command -v ruby-lsp >/dev/null
+            ruby-lsp --version >/dev/null 2>&1 || true
+          fi
+          if has_group compiled_cpp; then
+            command -v ccls >/dev/null
+            command -v zls >/dev/null
+            command -v verible-verilog-ls >/dev/null
+          fi
+          if has_group compiled_apple && [[ "$RUNNER_OS" != "Windows" ]]; then
+            command -v sourcekit-lsp >/dev/null
+          fi
+          if has_group data; then
+            if [[ "$RUNNER_OS" == "Windows" ]] && ! command -v Rscript >/dev/null 2>&1; then
+              rscript=$(find /c/R "/c/Program Files/R" /c/hostedtoolcache/windows/R -iname "Rscript.exe" -type f 2>/dev/null | head -1 || true)
+              [[ -n "$rscript" ]] && { PATH="$(dirname "$rscript"):$PATH"; export PATH; }
             fi
-            if ! command -v nixd >/dev/null 2>&1; then
-              nix profile install github:nix-community/nixd
+            Rscript -e "library(languageserver)" >/dev/null
+            if [[ "$RUNNER_OS" == "Windows" ]] && ! command -v julia >/dev/null 2>&1; then
+              julia_bin=$(find /c/hostedtoolcache/windows/julia -iname "julia.exe" -type f 2>/dev/null | head -1 || true)
+              [[ -n "$julia_bin" ]] && { PATH="$(dirname "$julia_bin"):$PATH"; export PATH; }
             fi
+            julia -e "using LanguageServer" >/dev/null
+          fi
+          if has_group niche; then
+            command -v lua-language-server >/dev/null
+            if [[ "$RUNNER_OS" != "Windows" ]]; then
+              perl -MPerl::LanguageServer -e 1 >/dev/null
+              command -v regal >/dev/null
+            else
+              command -v regal.exe >/dev/null
+            fi
+          fi
+          if has_group nix && [[ "$RUNNER_OS" != "Windows" ]]; then
             command -v nixd >/dev/null
-            nix build --no-link
-          }
+          fi
 
-          install_regal() {
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              rm -f "$HOME/bin/regal"
-              if command -v regal.exe >/dev/null 2>&1; then
-                return
-              fi
-            elif command -v regal >/dev/null 2>&1; then
-              return
-            fi
-
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              local arch="x86_64"
-              [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
-              curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Linux_${arch}"
-            elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              local arch="x86_64"
-              [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
-              curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_${arch}"
-            elif [[ "$RUNNER_OS" == "Windows" ]]; then
-              curl -L -o "$HOME/bin/regal.exe" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Windows_x86_64.exe"
-              chmod +x "$HOME/bin/regal.exe" 2>/dev/null || true
-            fi
-            chmod +x "$HOME/bin/regal" 2>/dev/null || true
-          }
-
-          install_fpc() {
-            if [[ "$RUNNER_OS" == "Linux" ]]; then
-              if ! command -v fpc >/dev/null 2>&1; then
-                sudo apt-get update
-                sudo apt-get install -y fpc fpc-source
-              fi
-              local fpcdir
-              fpcdir=$(ls -d /usr/share/fpcsrc/*/ 2>/dev/null | head -1 | sed 's:/$::')
-              [[ -z "$fpcdir" ]] && fpcdir="/usr/share/fpcsrc"
-              export PP="/usr/bin/fpc"
-              export FPCDIR="$fpcdir"
-              echo "PP=/usr/bin/fpc" >> "$GITHUB_ENV"
-              echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
-            elif [[ "$RUNNER_OS" == "macOS" ]]; then
-              if ! command -v fpc >/dev/null 2>&1; then
-                brew install fpc
-              fi
-              if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
-                curl -L -o fpc-source.tar.gz "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.tar.gz/download"
-                mkdir -p "$HOME/fpcsrc"
-                tar -xzf fpc-source.tar.gz -C "$HOME/fpcsrc"
-                rm fpc-source.tar.gz
-              fi
-              local fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}"
-              [[ -d "$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}/rtl" ]] && fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}"
-              export PP
-              PP="$(command -v fpc)"
-              export FPCDIR="$fpcdir"
-              echo "PP=$PP" >> "$GITHUB_ENV"
-              echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
-            elif [[ "$RUNNER_OS" == "Windows" ]]; then
-              if [[ ! -d "$HOME/fpc" ]]; then
-                curl -L -o fpc-ootb.zip "https://github.com/fredvs/freepascal-ootb/releases/download/${FPC_VERSION}/fpc-ootb-322-x86_64-win64.zip"
-                mkdir -p "$HOME/fpc"
-                unzip -q fpc-ootb.zip -d "$HOME/fpc"
-                rm fpc-ootb.zip
-              fi
-              if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
-                curl -L -o fpc-source.zip "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.zip/download"
-                mkdir -p "$HOME/fpcsrc"
-                unzip -q fpc-source.zip -d "$HOME/fpcsrc"
-                rm fpc-source.zip
-              fi
-              local fpc_exe
-              fpc_exe=$(find "$HOME/fpc" -name "fpc-ootb-64.exe" -type f 2>/dev/null | head -1)
-              export PP="$fpc_exe"
-              export FPCDIR="$HOME/fpcsrc/fpc-${FPC_VERSION}"
-              echo "PP=$fpc_exe" >> "$GITHUB_ENV"
-              echo "FPCDIR=$HOME/fpcsrc/fpc-${FPC_VERSION}" >> "$GITHUB_ENV"
-              echo "$(dirname "$fpc_exe")" >> "$GITHUB_PATH"
-            fi
-          }
-
-          verify_fpc() {
-            if ! has_group compiled && ! has_group compiled_cpp; then
-              return
-            fi
-            local test_pas test_out
-            if [[ "$RUNNER_OS" == "Windows" ]]; then
-              test_pas="$TEMP/fpc_test.pas"
-              test_out="$TEMP/fpc_test"
-            else
-              test_pas="/tmp/fpc_test.pas"
-              test_out="/tmp/fpc_test"
-            fi
-            echo "program fpc_test; begin writeln('FPC works'); end." > "$test_pas"
-            "$PP" "$test_pas" -o"$test_out" >/dev/null
-            [[ -f "$test_out" || -f "${test_out}.exe" ]]
-            [[ -d "$FPCDIR" ]]
-          }
-
-          ensure_windows_action_paths
-
-          if has_group go; then install_gopls; fi
-          if has_group ruby; then install_ruby_lsp; fi
-          if has_group compiled || has_group compiled_cpp; then install_ccls; install_zls; install_verible; install_fpc; fi
-          if has_group compiled || has_group compiled_apple; then install_swift; fi
-          if has_group ocaml; then install_ocaml_packages; fi
-          if has_group data; then install_r_language_server; install_julia_language_server; fi
-          if has_group haskell; then build_haskell_repo; fi
-          if has_group niche; then install_lua_language_server; install_perl_language_server; install_ansible_tools; install_regal; fi
-          if has_group web; then install_haxe; install_elm; fi
-          if has_group nix; then install_nixd; fi
-
-          verify_ocaml_lsp
-          verify_lsp_paths
-          verify_fpc
+      - name: Verify FPC
+        if: contains(matrix.shard.tools, 'compiled_cpp')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test_pas="$TEMP/fpc_test.pas"
+            test_out="$TEMP/fpc_test"
+          else
+            test_pas="/tmp/fpc_test.pas"
+            test_out="/tmp/fpc_test"
+          fi
+          echo "program fpc_test; begin writeln('FPC works'); end." > "$test_pas"
+          "$PP" "$test_pas" -o"$test_out" >/dev/null
+          [[ -f "$test_out" || -f "${test_out}.exe" ]]
+          [[ -d "$FPCDIR" ]]
 
       - name: Test with pytest
         env:
