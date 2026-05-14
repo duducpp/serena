@@ -458,16 +458,27 @@ runs:
 
         install_ocaml_packages() {
           # Ensure this shell sees the same opam switch/environment as setup-ocaml.
-          eval "$(opam env 2>/dev/null || true)"
+          eval "$(run_opam env 2>/dev/null || true)"
 
-          if opam exec -- which ocamllsp >/dev/null 2>&1; then
+          if run_opam exec -- which ocamllsp >/dev/null 2>&1; then
             return
           fi
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            opam exec -- opam install -y dune ocaml-lsp-server
+            run_opam install -y dune ocaml-lsp-server
           else
-            opam exec -- opam install -y dune 'ocaml-lsp-server>=1.23.0'
+            run_opam install -y dune 'ocaml-lsp-server>=1.23.0'
+          fi
+        }
+
+        run_opam() {
+          if command -v opam >/dev/null 2>&1; then
+            opam "$@"
+          elif command -v opam.exe >/dev/null 2>&1; then
+            opam.exe "$@"
+          else
+            echo "opam is not available on PATH" >&2
+            return 127
           fi
         }
 
@@ -476,9 +487,9 @@ runs:
             return
           fi
 
-          eval "$(opam env 2>/dev/null || true)"
-          opam exec -- which ocamllsp >/dev/null
-          opam exec -- ocamllsp --version >/dev/null
+          eval "$(run_opam env 2>/dev/null || true)"
+          run_opam exec -- which ocamllsp >/dev/null
+          run_opam exec -- ocamllsp --version >/dev/null
         }
 
         verify_lsp_paths() {

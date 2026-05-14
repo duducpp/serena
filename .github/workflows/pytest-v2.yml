@@ -44,7 +44,7 @@ jobs:
             markers: ""
           - name: core
             tools: "python node go ruby"
-            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+            markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
           - name: web
             tools: "python node web"
             markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
@@ -103,7 +103,7 @@ jobs:
             markers: ""
           - name: core
             tools: "python node go ruby"
-            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+            markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
           - name: web
             tools: "python node web"
             markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
@@ -151,7 +151,7 @@ jobs:
             markers: ""
           - name: core
             tools: "python node go ruby"
-            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+            markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
           - name: web
             tools: "python node web"
             markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"

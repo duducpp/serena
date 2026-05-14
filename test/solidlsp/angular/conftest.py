@@ -56,7 +56,8 @@ def _install_angular_test_repo_node_modules() -> None:
         log.info("Angular test repo node_modules already populated; skipping npm install")
         return
 
-    if shutil.which("npm") is None:
+    npm_executable = shutil.which("npm.cmd") or shutil.which("npm")
+    if npm_executable is None:
         pytest.skip("npm is not available; cannot install Angular test repo dependencies")
 
     with FileLock(str(INSTALL_LOCK)):
@@ -71,7 +72,7 @@ def _install_angular_test_repo_node_modules() -> None:
         )
 
         proc = subprocess.run(
-            ["npm", "install", "--no-audit", "--no-fund", "--loglevel=warn"],
+            [npm_executable, "install", "--no-audit", "--no-fund", "--loglevel=warn"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
