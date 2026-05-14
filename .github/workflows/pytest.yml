@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Free disk space
         if: runner.os == 'Linux'
         run: |
@@ -37,14 +37,14 @@ jobs:
           docker system prune -af || true
           df -h
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: "${{ matrix.python-version }}"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ">=1.17.0"
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20.x'
       - name: Ensure cached directory exist before calling cache-related actions
@@ -58,7 +58,7 @@ jobs:
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Cache uv virtualenv
         id: cache-uv
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: .venv
           key: uv-venv-${{ runner.os }}-${{ matrix.python-version }}-lock-${{ hashFiles('uv.lock') }}
@@ -82,7 +82,7 @@ jobs:
       # Writing to this file adds the directory to the PATH for subsequent steps
       - name: Cache Go binaries
         id: cache-go-binaries
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/bin
@@ -135,12 +135,12 @@ jobs:
             exit 1
           fi
       - name: Setup Java (for JVM based languages)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
       - name: Setup .NET SDK (for F# and C# languages)
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: List .NET runtimes
@@ -573,7 +573,7 @@ jobs:
           fi
       - name: Cache language servers
         id: cache-language-servers
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ~/.serena/language_servers/static
           key: language-servers-${{ runner.os }}-v1
