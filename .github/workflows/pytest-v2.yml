@@ -32,20 +32,15 @@ env:
 
 jobs:
   lint:
-    name: lint
-    runs-on: ubuntu-latest
-
-    ### is it necessary to run lint on all OSes?
-    # name: ${{ matrix.os }}-lint
-    # runs-on: ${{ matrix.os }}
-    # strategy:
-    #   fail-fast: false
-    #   matrix:
-    #     os:
-    #       - ubuntu-latest
-    #       - windows-2025-vs2026
-    #       - macos-latest
-
+    name: ${{ matrix.os }}-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-2025-vs2026
+          - macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -60,20 +55,15 @@ jobs:
         run: uv run poe lint
 
   type-check:
-    name: type-check
-    runs-on: ubuntu-latest
-
-    ### is it necessary to run type-check on all OSes?
-    # name: ${{ matrix.os }}-type-check
-    # runs-on: ${{ matrix.os }}
-    # strategy:
-    #   fail-fast: false
-    #   matrix:
-    #     os:
-    #       - ubuntu-latest
-    #       - windows-2025-vs2026
-    #       - macos-latest
-
+    name: ${{ matrix.os }}-type-check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-2025-vs2026
+          - macos-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -106,22 +96,22 @@ jobs:
           - name: web
             tools: "python node web"
             markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
-          - name: jvm-dotnet
+          - name: jvm
             tools: "python java dotnet clojure"
             markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
-          - name: compiled-cpp
+          - name: systems
             tools: "python compiled_cpp haskell lean"
             markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
-          - name: compiled-apple
+          - name: apple
             tools: "python compiled_apple"
             markers: "swift"
           - name: data
             tools: "python data ocaml nix"
             markers: "r or julia or ocaml or fortran or terraform or nix"
-          - name: niche-beam
+          - name: beam
             tools: "python node elixir"
             markers: "elixir or erlang"
-          - name: niche-script
+          - name: scripting
             tools: "python java niche"
             markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
     steps:
