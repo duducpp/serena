@@ -270,6 +270,14 @@ runs:
           ${{ runner.os == 'Windows' && 'opam-repository-mingw: https://github.com/ocaml-opam/opam-repository-mingw.git#sunset' || '' }}
           default: https://github.com/ocaml/opam-repository.git
 
+    - name: Expose Windows opam path
+      if: contains(inputs.shard-tools, 'ocaml') && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $opam = (Get-Command opam.exe -ErrorAction Stop).Source
+        "OPAM_EXE=$opam" >> $env:GITHUB_ENV
+        Split-Path $opam >> $env:GITHUB_PATH
+
     - name: Set up R
       if: contains(inputs.shard-tools, 'data')
       uses: r-lib/actions/setup-r@v2
@@ -364,11 +372,29 @@ runs:
 
           if has_group ocaml; then
             local opam_exe opam_dir opam_windows_path
-            opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
-            if [[ -n "$opam_windows_path" ]]; then
-              opam_exe=$(cygpath -u "$opam_windows_path")
+            if [[ -n "${OPAM_EXE:-}" ]]; then
+              opam_exe=$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")
             else
-              opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+              opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
+              if [[ -n "$opam_windows_path" ]]; then
+                opam_exe=$(cygpath -u "$opam_windows_path")
+              else
+                opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+              fi
+            fi
+            if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe ]]; then
+              opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x86_64/opam.exe
+            fi
+            if [[ -z "$opam_exe" && -x /c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe ]]; then
+              opam_exe=/c/hostedtoolcache/windows/opam/2.5.1/x64/opam.exe
+            fi
+            if [[ -z "$opam_exe" && -d /c/hostedtoolcache/windows/opam ]]; then
+              opam_exe=$(find /c/hostedtoolcache/windows/opam -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+            fi
+            if [[ -n "$opam_exe" && -f "$opam_exe" ]]; then
+              :
+            else
+              opam_exe=""
             fi
             if [[ -z "$opam_exe" ]]; then
               echo "Could not locate opam.exe after ocaml/setup-ocaml" >&2
@@ -472,7 +498,9 @@ runs:
         }
 
         run_opam() {
-          if command -v opam >/dev/null 2>&1; then
+          if [[ -n "${OPAM_EXE:-}" && -f "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" ]]; then
+            "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" "$@"
+          elif command -v opam >/dev/null 2>&1; then
             opam "$@"
           elif command -v opam.exe >/dev/null 2>&1; then
             opam.exe "$@"
