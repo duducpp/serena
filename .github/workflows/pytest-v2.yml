@@ -28,6 +28,7 @@ env:
   RUBY_VERSION: "3.4"
   R_VERSION: "4.4.2"
   JULIA_VERSION: "1.10"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   lint:
@@ -42,7 +43,7 @@ jobs:
     #   matrix:
     #     os:
     #       - ubuntu-latest
-    #       - windows-latest
+    #       - windows-2025-vs2026
     #       - macos-latest
 
     timeout-minutes: 10
@@ -70,7 +71,7 @@ jobs:
     #   matrix:
     #     os:
     #       - ubuntu-latest
-    #       - windows-latest
+    #       - windows-2025-vs2026
     #       - macos-latest
 
     timeout-minutes: 10
@@ -96,7 +97,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - windows-latest
+          - windows-2025-vs2026
           - macos-latest
         shard:
           - name: core

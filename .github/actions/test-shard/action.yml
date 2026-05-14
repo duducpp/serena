@@ -271,6 +271,22 @@ runs:
           [[ " ${SHARD_TOOLS} " == *" $1 "* ]]
         }
 
+        ensure_windows_rscript_path() {
+          if [[ "$RUNNER_OS" != "Windows" ]] || command -v Rscript >/dev/null 2>&1; then
+            return
+          fi
+
+          local rscript
+          rscript=$(find /c/R "/c/Program Files/R" /c/hostedtoolcache/windows/R -iname "Rscript.exe" -type f 2>/dev/null | head -1 || true)
+          if [[ -z "$rscript" ]]; then
+            echo "Could not locate Rscript.exe after r-lib/actions/setup-r" >&2
+            return 127
+          fi
+
+          PATH="$(dirname "$rscript"):$PATH"
+          export PATH
+        }
+
         ensure_windows_action_paths() {
           if [[ "$RUNNER_OS" != "Windows" ]]; then
             return
@@ -476,6 +492,7 @@ runs:
           fi
 
           if has_group data; then
+            ensure_windows_rscript_path
             Rscript -e "library(languageserver)" >/dev/null
             julia -e "using LanguageServer" >/dev/null
           fi
@@ -496,6 +513,8 @@ runs:
         }
 
         install_r_language_server() {
+          ensure_windows_rscript_path
+
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y libuv1-dev pkg-config

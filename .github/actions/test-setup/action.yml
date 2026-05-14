@@ -51,8 +51,9 @@ runs:
       env:
         UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       with:
-        enable-cache: true
-        cache-dependency-glob: uv.lock
+        enable-cache: false
+        restore-cache: false
+        save-cache: false
 
     - name: Restore Python cache
       uses: actions/cache@v5
