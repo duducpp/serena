@@ -414,6 +414,22 @@ jobs:
             export PATH
           }
 
+          ensure_windows_julia_path() {
+            if [[ "$RUNNER_OS" != "Windows" ]] || command -v julia >/dev/null 2>&1; then
+              return
+            fi
+
+            local julia_bin
+            julia_bin=$(find /c/hostedtoolcache/windows/julia -iname "julia.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$julia_bin" ]]; then
+              echo "Could not locate julia.exe after julia-actions/setup-julia" >&2
+              return 127
+            fi
+
+            PATH="$(dirname "$julia_bin"):$PATH"
+            export PATH
+          }
+
           ensure_windows_action_paths() {
             if [[ "$RUNNER_OS" != "Windows" ]]; then
               return
@@ -621,6 +637,7 @@ jobs:
             if has_group data; then
               ensure_windows_rscript_path
               Rscript -e "library(languageserver)" >/dev/null
+              ensure_windows_julia_path
               julia -e "using LanguageServer" >/dev/null
             fi
 
@@ -671,6 +688,7 @@ jobs:
           }
 
           install_julia_language_server() {
+            ensure_windows_julia_path
             julia -e 'using Pkg; try using LanguageServer catch; Pkg.add("LanguageServer"); using LanguageServer end'
           }
 
