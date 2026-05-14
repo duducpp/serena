@@ -184,7 +184,7 @@ runs:
           haskell-${{ runner.os }}-
 
     - name: Restore compiled tool cache
-      if: contains(concat(' ', inputs.shard-tools, ' '), ' compiled_cpp ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled_apple ')
+      if: contains(format(' {0} ', inputs.shard-tools), ' compiled_cpp ') || contains(format(' {0} ', inputs.shard-tools), ' compiled ') || contains(format(' {0} ', inputs.shard-tools), ' compiled_apple ')
       uses: actions/cache@v5
       with:
         path: |
@@ -292,7 +292,7 @@ runs:
         hls: "2.11.0.0"
 
     - name: Set up Zig
-      if: contains(concat(' ', inputs.shard-tools, ' '), ' compiled_cpp ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled ')
+      if: contains(format(' {0} ', inputs.shard-tools), ' compiled_cpp ') || contains(format(' {0} ', inputs.shard-tools), ' compiled ')
       uses: goto-bus-stop/setup-zig@v2
       with:
         version: ${{ env.ZIG_VERSION }}
