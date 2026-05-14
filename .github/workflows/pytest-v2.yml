@@ -67,7 +67,7 @@ jobs:
             tools: "python java niche"
             markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -126,7 +126,7 @@ jobs:
             tools: "python java niche"
             markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -174,7 +174,7 @@ jobs:
             tools: "python java niche"
             markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
