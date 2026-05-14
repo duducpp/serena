@@ -1,0 +1,918 @@
+name: Set up and test CI shard
+description: Restore focused caches, install shard tools, and run a pytest marker shard.
+
+inputs:
+  shard-name:
+    required: true
+    description: Shard display name.
+  shard-tools:
+    required: true
+    description: Space-separated tool groups required by this shard.
+  shard-markers:
+    required: true
+    description: Pytest marker expression for this shard.
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare cache directories
+      shell: bash
+      run: |
+        echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
+        echo "PNPM_HOME=$RUNNER_TEMP/pnpm-home" >> "$GITHUB_ENV"
+        echo "PNPM_STORE_DIR=$RUNNER_TEMP/pnpm-store" >> "$GITHUB_ENV"
+        echo "ELM_HOME=$RUNNER_TEMP/elm-home" >> "$GITHUB_ENV"
+        echo "R_LIBS_USER=$RUNNER_TEMP/r-library" >> "$GITHUB_ENV"
+        echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/julia" >> "$GITHUB_ENV"
+        mkdir -p \
+          "$RUNNER_TEMP/uv-cache" \
+          "$HOME/.serena/language_servers/static" \
+          "$HOME/bin" \
+          "$HOME/perl5" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/bin" \
+          "$HOME/go/pkg/mod" \
+          "$HOME/.cache/dune" \
+          "$HOME/.cabal" \
+          "$HOME/.ghcup" \
+          "$RUNNER_TEMP/pnpm-home" \
+          "$RUNNER_TEMP/pnpm-store" \
+          "$RUNNER_TEMP/elm-home" \
+          "$RUNNER_TEMP/r-library" \
+          "$RUNNER_TEMP/julia"
+        echo "$HOME/bin" >> "$GITHUB_PATH"
+        echo "$RUNNER_TEMP/pnpm-home" >> "$GITHUB_PATH"
+        echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
+        echo "PERL5LIB=$HOME/perl5/lib/perl5${PERL5LIB:+:${PERL5LIB}}" >> "$GITHUB_ENV"
+        echo "PERL_LOCAL_LIB_ROOT=$HOME/perl5${PERL_LOCAL_LIB_ROOT:+:${PERL_LOCAL_LIB_ROOT}}" >> "$GITHUB_ENV"
+        echo "PERL_MB_OPT=--install_base \"$HOME/perl5\"" >> "$GITHUB_ENV"
+        echo "PERL_MM_OPT=INSTALL_BASE=$HOME/perl5" >> "$GITHUB_ENV"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v8.1.0
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Restore Python cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          .venv
+          ${{ runner.temp }}/uv-cache
+        key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}-v3
+        restore-keys: |
+          python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+          python-${{ runner.os }}-
+
+    - name: Install Python environment
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv sync --extra dev --locked
+        rm -rf .uv-cache
+
+    - name: Set up Node.js
+      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20.x"
+
+    - name: Set up pnpm
+      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10
+        run_install: false
+
+    - name: Restore pnpm cache
+      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/pnpm-home
+          ${{ runner.temp }}/pnpm-store
+          ${{ runner.temp }}/elm-home
+        key: node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-${{ hashFiles('.github/workflows/pytest-v2.yml', '.github/actions/test-shard/action.yml') }}
+        restore-keys: |
+          node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-
+          node-pnpm-${{ runner.os }}-
+
+    - name: Configure pnpm
+      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
+      shell: bash
+      run: pnpm config set store-dir "$PNPM_STORE_DIR"
+
+    - name: Restore Go cache
+      if: contains(inputs.shard-tools, 'go')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/bin
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/Library/Caches/go-build
+          ~/AppData/Local/go-build
+        key: go-${{ runner.os }}-gopls-latest-v2
+        restore-keys: |
+          go-${{ runner.os }}-
+
+    - name: Set up Go
+      if: contains(inputs.shard-tools, 'go')
+      uses: actions/setup-go@v5
+      with:
+        go-version: ">=1.17.0"
+        cache: false
+
+    - name: Restore static language-server cache
+      if: contains(inputs.shard-tools, 'compiled') || contains(inputs.shard-tools, 'niche') || contains(inputs.shard-tools, 'web')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.serena/language_servers
+          ~/bin
+        key: static-ls-${{ runner.os }}-${{ inputs.shard-name }}-lua-${{ env.LUA_LS_VERSION }}-zls-${{ env.ZLS_VERSION }}-haxe-${{ env.HAXE_VERSION }}-verible-${{ env.VERIBLE_VERSION }}-regal-${{ env.REGAL_VERSION }}-v4
+        restore-keys: |
+          static-ls-${{ runner.os }}-${{ inputs.shard-name }}-
+          static-ls-${{ runner.os }}-
+
+    - name: Restore OCaml cache
+      if: contains(inputs.shard-tools, 'ocaml')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.opam
+          ~/.cache/dune
+        key: ocaml-${{ runner.os }}-${{ hashFiles('.github/workflows/pytest-v2.yml', '.github/actions/test-shard/action.yml') }}
+        restore-keys: |
+          ocaml-${{ runner.os }}-
+
+    - name: Restore R and Julia cache
+      if: contains(inputs.shard-tools, 'data')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/r-library
+          ${{ runner.temp }}/julia
+        key: r-julia-${{ runner.os }}-r-${{ env.R_VERSION }}-julia-${{ env.JULIA_VERSION }}-v2
+        restore-keys: |
+          r-julia-${{ runner.os }}-
+
+    - name: Restore Haskell cache
+      if: contains(inputs.shard-tools, 'haskell') && runner.os != 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ghcup
+          ~/.cabal
+          test/resources/repos/haskell/test_repo/dist-newstyle
+        key: haskell-${{ runner.os }}-ghc-9.12.2-cabal-3.10.3.0-hls-2.11.0.0-v2
+        restore-keys: |
+          haskell-${{ runner.os }}-
+
+    - name: Restore compiled tool cache
+      if: contains(concat(' ', inputs.shard-tools, ' '), ' compiled_cpp ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled_apple ')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.swiftly
+          ~/.local/share/swiftly
+          ~/fpc
+          ~/fpcsrc
+          ~/bin
+          ~/.cache/zig
+        key: compiled-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-zig-${{ env.ZIG_VERSION }}-fpc-${{ env.FPC_VERSION }}-verible-${{ env.VERIBLE_VERSION }}-v2
+        restore-keys: |
+          compiled-${{ runner.os }}-
+
+    - name: Restore Nix and Lean cache
+      if: contains(inputs.shard-tools, 'nix') || contains(inputs.shard-tools, 'lean')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.nix-profile
+          ~/.cache/nix
+          ~/.elan
+          ~/.lake
+          test/resources/repos/lean4/test_repo/.lake
+        key: nix-lean-${{ runner.os }}-${{ inputs.shard-name }}-${{ hashFiles('flake.lock', 'test/resources/repos/lean4/test_repo/lake-manifest.json') }}-v2
+        restore-keys: |
+          nix-lean-${{ runner.os }}-${{ inputs.shard-name }}-
+          nix-lean-${{ runner.os }}-
+
+    - name: Restore JVM, .NET, and Ruby cache
+      if: contains(inputs.shard-tools, 'java') || contains(inputs.shard-tools, 'dotnet') || contains(inputs.shard-tools, 'ruby')
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gem
+          ~/.nuget/packages
+          ~/.m2
+          ~/.gradle
+          ~/.cache/coursier
+        key: ruby-dotnet-java-${{ runner.os }}-${{ inputs.shard-name }}-ruby-${{ env.RUBY_VERSION }}-java-21-dotnet-10-v2
+        restore-keys: |
+          ruby-dotnet-java-${{ runner.os }}-${{ inputs.shard-name }}-
+          ruby-dotnet-java-${{ runner.os }}-
+
+    - name: Set up Java
+      if: contains(inputs.shard-tools, 'java')
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Set up .NET SDK
+      if: contains(inputs.shard-tools, 'dotnet')
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+
+    - name: Set up Ruby
+      if: contains(inputs.shard-tools, 'ruby')
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ env.RUBY_VERSION }}
+
+    - name: Set up Elixir
+      if: contains(inputs.shard-tools, 'elixir') && runner.os != 'Windows'
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: "1.19.3"
+        otp-version: "28"
+
+    - name: Set up Clojure
+      if: contains(inputs.shard-tools, 'clojure')
+      uses: DeLaGuardo/setup-clojure@13.4
+      with:
+        cli: latest
+
+    - name: Set up OCaml
+      if: contains(inputs.shard-tools, 'ocaml')
+      uses: ocaml/setup-ocaml@v3
+      with:
+        ocaml-compiler: ${{ runner.os == 'Windows' && '4.14' || '5.3.x' }}
+        dune-cache: true
+        opam-repositories: |
+          ${{ runner.os == 'Windows' && 'opam-repository-mingw: https://github.com/ocaml-opam/opam-repository-mingw.git#sunset' || '' }}
+          default: https://github.com/ocaml/opam-repository.git
+
+    - name: Set up R
+      if: contains(inputs.shard-tools, 'data')
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: ${{ env.R_VERSION }}
+        use-public-rspm: true
+
+    - name: Set up Julia
+      if: contains(inputs.shard-tools, 'data')
+      uses: julia-actions/setup-julia@v2
+      with:
+        version: ${{ env.JULIA_VERSION }}
+
+    - name: Set up Haskell toolchain
+      if: contains(inputs.shard-tools, 'haskell') && runner.os != 'Windows'
+      uses: haskell/ghcup-setup@v1
+      with:
+        ghc: "9.12.2"
+        cabal: "3.10.3.0"
+        hls: "2.11.0.0"
+
+    - name: Set up Zig
+      if: contains(concat(' ', inputs.shard-tools, ' '), ' compiled_cpp ') || contains(concat(' ', inputs.shard-tools, ' '), ' compiled ')
+      uses: goto-bus-stop/setup-zig@v2
+      with:
+        version: ${{ env.ZIG_VERSION }}
+
+    - name: Set up Terraform
+      if: contains(inputs.shard-tools, 'data')
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.5.0"
+        terraform_wrapper: false
+
+    - name: Set up Haxe
+      if: contains(inputs.shard-tools, 'web') && runner.os != 'Linux'
+      uses: krdlab/setup-haxe@v2
+      with:
+        haxe-version: ${{ env.HAXE_VERSION }}
+
+    - name: Set up Nix
+      if: contains(inputs.shard-tools, 'nix') && runner.os != 'Windows'
+      uses: cachix/install-nix-action@v30
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Build Lean 4 test project
+      if: contains(inputs.shard-tools, 'lean')
+      uses: leanprover/lean-action@v1
+      with:
+        lake-package-directory: test/resources/repos/lean4/test_repo
+
+    - name: Install guarded shard tools
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        has_group() {
+          [[ " ${{ inputs.shard-tools }} " == *" $1 "* ]]
+        }
+
+        ensure_windows_action_paths() {
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            return
+          fi
+
+          local ci_bin ci_bin_win
+          ci_bin="${RUNNER_TEMP:-$HOME}/ci-bin"
+          ci_bin=$(cygpath -u "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          ci_bin_win=$(cygpath -w "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
+          mkdir -p "$ci_bin"
+
+          if has_group lean; then
+            local lean_bin
+            lean_bin=$(find /c/Users/runneradmin/.elan /c/Users/runneradmin -iname "lean.exe" -type f 2>/dev/null | head -1 || true)
+            if [[ -z "$lean_bin" ]]; then
+              echo "Could not locate lean.exe after leanprover/lean-action" >&2
+              return 1
+            fi
+            lean_bin=$(dirname "$lean_bin")
+            for tool in elan lake lean; do
+              if [[ -x "$lean_bin/$tool.exe" ]]; then
+                printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$lean_bin/$tool.exe" > "$ci_bin/$tool"
+                printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$lean_bin/$tool.exe")" > "$ci_bin/$tool.cmd"
+                chmod +x "$ci_bin/$tool"
+              fi
+            done
+            export PATH="$ci_bin:$lean_bin:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$lean_bin")" >> "$GITHUB_PATH"
+          fi
+
+          if has_group ocaml; then
+            local opam_exe opam_dir opam_windows_path
+            opam_windows_path=$(powershell.exe -NoLogo -NoProfile -Command "(Get-Command opam.exe -ErrorAction SilentlyContinue).Source" | tr -d '\r' | head -1 || true)
+            if [[ -n "$opam_windows_path" ]]; then
+              opam_exe=$(cygpath -u "$opam_windows_path")
+            else
+              opam_exe=$(find /c/hostedtoolcache /c/Users/runneradmin -iname "opam.exe" -type f 2>/dev/null | head -1 || true)
+            fi
+            if [[ -z "$opam_exe" ]]; then
+              echo "Could not locate opam.exe after ocaml/setup-ocaml" >&2
+              return 1
+            fi
+            opam_dir=$(dirname "$opam_exe")
+            printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$opam_exe" > "$ci_bin/opam"
+            printf '@echo off\r\n"%s" %%*\r\n' "$(cygpath -w "$opam_exe")" > "$ci_bin/opam.cmd"
+            chmod +x "$ci_bin/opam"
+            export PATH="$ci_bin:$opam_dir:$PATH"
+            echo "$ci_bin_win" >> "$GITHUB_PATH"
+            echo "$(cygpath -w "$opam_dir")" >> "$GITHUB_PATH"
+          fi
+        }
+
+        download_with_retry() {
+          local url="$1"
+          local output="$2"
+          for attempt in 1 2 3 4 5; do
+            if curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url"; then
+              return 0
+            fi
+            echo "Download failed for $url on attempt $attempt"
+            sleep $((attempt * 10))
+          done
+          return 1
+        }
+
+        install_gopls() {
+          if ! command -v gopls >/dev/null 2>&1; then
+            go install golang.org/x/tools/gopls@latest
+          fi
+          gopls version
+        }
+
+        install_ruby_lsp() {
+          if ! command -v ruby-lsp >/dev/null 2>&1; then
+            gem install ruby-lsp
+          fi
+          ruby-lsp --version || true
+        }
+
+        install_ccls() {
+          if command -v ccls >/dev/null 2>&1; then
+            ccls --version 2>&1 | head -1 || true
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ccls
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install ccls
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            choco install ccls -y
+          fi
+          command -v ccls >/dev/null
+        }
+
+        install_swift() {
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            return
+          fi
+          if command -v sourcekit-lsp >/dev/null 2>&1; then
+            sourcekit-lsp --help >/dev/null || true
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+            installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+            ~/.swiftly/bin/swiftly init --quiet-shell-followup
+            . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          else
+            sudo apt-get update
+            sudo apt-get -y install libcurl4-openssl-dev
+            curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+            tar zxf "swiftly-$(uname -m).tar.gz"
+            ./swiftly init --quiet-shell-followup
+            . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+          fi
+
+          swiftly install --use "$SWIFT_VERSION"
+          swiftly use "$SWIFT_VERSION"
+          sourcekit-lsp --help >/dev/null || true
+        }
+
+        install_ocaml_packages() {
+          # Ensure this shell sees the same opam switch/environment as setup-ocaml.
+          eval "$(opam env 2>/dev/null || true)"
+
+          if opam exec -- which ocamllsp >/dev/null 2>&1; then
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            opam exec -- opam install -y dune ocaml-lsp-server
+          else
+            opam exec -- opam install -y dune 'ocaml-lsp-server>=1.23.0'
+          fi
+        }
+
+        verify_ocaml_lsp() {
+          if ! has_group ocaml; then
+            return
+          fi
+
+          eval "$(opam env 2>/dev/null || true)"
+          opam exec -- which ocamllsp >/dev/null
+          opam exec -- ocamllsp --version >/dev/null
+        }
+
+        verify_lsp_paths() {
+          if has_group go; then
+            command -v gopls >/dev/null
+            gopls version >/dev/null 2>&1 || true
+          fi
+
+          if has_group ruby; then
+            command -v ruby-lsp >/dev/null
+            ruby-lsp --version >/dev/null 2>&1 || true
+          fi
+
+          if has_group compiled || has_group compiled_cpp; then
+            command -v ccls >/dev/null
+            command -v zls >/dev/null
+            command -v verible-verilog-ls >/dev/null
+          fi
+
+          if has_group compiled || has_group compiled_apple; then
+            if [[ "$RUNNER_OS" != "Windows" ]]; then
+              command -v sourcekit-lsp >/dev/null
+            fi
+          fi
+
+          if has_group data; then
+            Rscript -e "library(languageserver)" >/dev/null
+            julia -e "using LanguageServer" >/dev/null
+          fi
+
+          if has_group niche; then
+            command -v lua-language-server >/dev/null
+            if [[ "$RUNNER_OS" != "Windows" ]]; then
+              perl -MPerl::LanguageServer -e 1 >/dev/null
+              command -v regal >/dev/null
+            else
+              command -v regal.exe >/dev/null
+            fi
+          fi
+
+          if has_group nix && [[ "$RUNNER_OS" != "Windows" ]]; then
+            command -v nixd >/dev/null
+          fi
+        }
+
+        install_r_language_server() {
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libuv1-dev pkg-config
+          fi
+
+          Rscript - <<'RSCRIPT'
+        dir.create(Sys.getenv("R_LIBS_USER"), recursive = TRUE, showWarnings = FALSE)
+        repos <- getOption("repos")
+        if (identical(repos["CRAN"], "@CRAN@")) repos["CRAN"] <- "https://cloud.r-project.org"
+        options(repos = repos)
+        options(pkgType = if (.Platform$pkgType == "both") "binary" else .Platform$pkgType)
+        pkgs <- c("fs", "pkgload", "roxygen2", "languageserver")
+        missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+        if (length(missing) > 0) {
+          install.packages(
+            missing,
+            lib = Sys.getenv("R_LIBS_USER"),
+            dependencies = TRUE,
+            Ncpus = max(1L, parallel::detectCores() - 1L)
+          )
+        }
+        library(languageserver)
+        RSCRIPT
+        }
+
+        install_julia_language_server() {
+          julia -e 'using Pkg; try using LanguageServer catch; Pkg.add("LanguageServer"); using LanguageServer end'
+        }
+
+        build_haskell_repo() {
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            return
+          fi
+          ghc --version
+          cabal --version
+          if command -v haskell-language-server-wrapper >/dev/null 2>&1; then
+            haskell-language-server-wrapper --version || true
+          elif command -v haskell-language-server >/dev/null 2>&1; then
+            haskell-language-server --version || true
+          fi
+          cd test/resources/repos/haskell/test_repo
+          cabal update
+          cabal build --only-dependencies
+          cabal build
+        }
+
+        install_zls() {
+          if command -v zls >/dev/null 2>&1; then
+            zls --version || true
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz" zls-x86_64-linux.tar.xz
+            tar -xf zls-x86_64-linux.tar.xz
+            mv zls "$HOME/bin/"
+            rm zls-x86_64-linux.tar.xz
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            download_with_retry "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-macos.tar.xz" zls-x86_64-macos.tar.xz
+            tar -xf zls-x86_64-macos.tar.xz
+            mv zls "$HOME/bin/"
+            rm zls-x86_64-macos.tar.xz
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o zls.zip "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-windows.zip"
+            unzip -o zls.zip
+            mv zls.exe "$HOME/bin/"
+            rm zls.zip
+          fi
+        }
+
+        install_verible() {
+          if command -v verible-verilog-ls >/dev/null 2>&1; then
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+            tar -xzf "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+            mv "verible-${VERIBLE_VERSION}/bin/verible-verilog-ls" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}" "verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            download_with_retry "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-macOS.tar.gz" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+            tar -xzf "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+            mv "verible-${VERIBLE_VERSION}-macOS/bin/verible-verilog-ls" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}-macOS" "verible-${VERIBLE_VERSION}-macOS.tar.gz"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o verible.zip "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-win64.zip"
+            unzip -o verible.zip
+            mv "verible-${VERIBLE_VERSION}-win64/verible-verilog-ls.exe" "$HOME/bin/"
+            rm -rf "verible-${VERIBLE_VERSION}-win64" verible.zip
+          fi
+          command -v verible-verilog-ls >/dev/null
+        }
+
+        install_lua_language_server() {
+          if command -v lua-language-server >/dev/null 2>&1; then
+            return
+          fi
+
+          local lua_ls_dir="$HOME/.serena/language_servers/lua"
+          mkdir -p "$lua_ls_dir"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            local arch="x64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
+            tar -xzf "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz" -C "$lua_ls_dir"
+            rm "lua-language-server-${LUA_LS_VERSION}-linux-${arch}.tar.gz"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            local arch="x64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            download_with_retry "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
+            tar -xzf "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz" -C "$lua_ls_dir"
+            rm "lua-language-server-${LUA_LS_VERSION}-darwin-${arch}.tar.gz"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o lua-ls.zip "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-win32-x64.zip"
+            unzip -o lua-ls.zip -d "$lua_ls_dir"
+            rm lua-ls.zip
+          fi
+
+          chmod +x "$lua_ls_dir/bin/lua-language-server" 2>/dev/null || true
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cat > "$HOME/bin/lua-language-server" <<'EOF'
+        #!/usr/bin/env bash
+        cd "${HOME}/.serena/language_servers/lua/bin"
+        exec ./lua-language-server.exe "$@"
+        EOF
+            chmod +x "$HOME/bin/lua-language-server"
+          else
+            cat > "$HOME/bin/lua-language-server" <<'EOF'
+        #!/usr/bin/env bash
+        cd "${HOME}/.serena/language_servers/lua/bin"
+        exec ./lua-language-server "$@"
+        EOF
+            chmod +x "$HOME/bin/lua-language-server"
+          fi
+        }
+
+        install_perl_language_server() {
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            return
+          fi
+          if perl -MPerl::LanguageServer -e 1 >/dev/null 2>&1; then
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y cpanminus build-essential libanyevent-perl libio-aio-perl
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install cpanminus
+          fi
+          PERL_MM_USE_DEFAULT=1 cpanm --notest --force Perl::LanguageServer
+        }
+
+        install_ansible_tools() {
+          uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv run pip install ansible-core ansible-lint
+        }
+
+        install_haxe() {
+          if command -v haxe >/dev/null 2>&1 && haxe -version | grep -q "^${HAXE_VERSION}$"; then
+            haxe -version
+            return
+          fi
+
+          if [[ "$RUNNER_OS" != "Linux" ]]; then
+            command -v haxe >/dev/null
+            haxe -version
+            return
+          fi
+
+          local haxe_root="$HOME/.serena/language_servers/static/haxe-${HAXE_VERSION}"
+          local neko_root="$HOME/.serena/language_servers/static/neko-2.4.0"
+          local haxe_archive="$RUNNER_TEMP/haxe-${HAXE_VERSION}-linux64.tar.gz"
+          local neko_archive="$RUNNER_TEMP/neko-2.4.0-linux64.tar.gz"
+          mkdir -p "$haxe_root" "$neko_root"
+
+          if [[ ! -x "$haxe_root/haxe" || -z "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)" || -z "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)" ]]; then
+            rm -rf "$haxe_root" "$neko_root"
+            mkdir -p "$haxe_root" "$neko_root"
+            download_with_retry "https://github.com/HaxeFoundation/neko/releases/download/v2-4-0/neko-2.4.0-linux64.tar.gz" "$neko_archive"
+            download_with_retry "https://github.com/HaxeFoundation/haxe/releases/download/${HAXE_VERSION}/haxe-${HAXE_VERSION}-linux64.tar.gz" "$haxe_archive"
+            tar -xzf "$neko_archive" -C "$neko_root" --strip-components=1
+            tar -xzf "$haxe_archive" -C "$haxe_root" --strip-components=1
+            mkdir -p "$haxe_root/lib"
+          fi
+
+          local neko_bin_dir
+          local neko_lib_dir
+          local neko_lib_path
+          neko_bin_dir=$(dirname "$(find "$neko_root" -type f -name neko -perm -u+x -print -quit)")
+          neko_lib_dir=$(dirname "$(find "$neko_root" -type f -name 'libneko.so*' -print -quit)")
+          if [[ -z "$neko_bin_dir" || -z "$neko_lib_dir" ]]; then
+            echo "Could not locate Neko runtime under $neko_root"
+            find "$neko_root" -maxdepth 3 -type f | sort
+            return 1
+          fi
+
+          neko_lib_path="$neko_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export PATH="$haxe_root:$neko_bin_dir:$PATH"
+          export LD_LIBRARY_PATH="$neko_lib_path"
+          echo "$haxe_root" >> "$GITHUB_PATH"
+          echo "$neko_bin_dir" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$neko_lib_path" >> "$GITHUB_ENV"
+          haxelib setup "$haxe_root/lib"
+          haxe -version
+        }
+
+        install_elm() {
+          if command -v elm >/dev/null 2>&1 && elm --version | grep -q '^0\.19\.1$'; then
+            echo "Elm compiler already installed"
+          else
+            local asset output
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              asset="binary-for-linux-64-bit.gz"
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              if [[ "$(uname -m)" == "arm64" ]]; then
+                asset="binary-for-mac-64-bit-ARM.gz"
+              else
+                asset="binary-for-mac-64-bit.gz"
+              fi
+              output="$HOME/bin/elm"
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              asset="binary-for-windows-64-bit.gz"
+              output="$HOME/bin/elm.exe"
+            fi
+
+            download_with_retry "https://github.com/elm/compiler/releases/download/${ELM_VERSION}/${asset}" "$RUNNER_TEMP/$asset"
+            python -c 'import gzip, pathlib, sys; pathlib.Path(sys.argv[2]).write_bytes(gzip.open(sys.argv[1], "rb").read())' "$RUNNER_TEMP/$asset" "$output"
+            chmod +x "$output" 2>/dev/null || true
+          fi
+          elm --version
+          (cd test/resources/repos/elm/test_repo && elm make Main.elm --output="$RUNNER_TEMP/elm-test.js")
+        }
+
+        install_nixd() {
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            return
+          fi
+          if ! command -v nixd >/dev/null 2>&1; then
+            nix profile install github:nix-community/nixd
+          fi
+          command -v nixd >/dev/null
+          nix build --no-link
+        }
+
+        install_regal() {
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            rm -f "$HOME/bin/regal"
+            if command -v regal.exe >/dev/null 2>&1; then
+              return
+            fi
+          elif command -v regal >/dev/null 2>&1; then
+            return
+          fi
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            local arch="x86_64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Linux_${arch}"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            local arch="x86_64"
+            [[ "$(uname -m)" != "x86_64" ]] && arch="arm64"
+            curl -L -o "$HOME/bin/regal" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Darwin_${arch}"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -L -o "$HOME/bin/regal.exe" "https://github.com/StyraInc/regal/releases/download/v${REGAL_VERSION}/regal_Windows_x86_64.exe"
+            chmod +x "$HOME/bin/regal.exe" 2>/dev/null || true
+          fi
+          chmod +x "$HOME/bin/regal" 2>/dev/null || true
+        }
+
+        install_fpc() {
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            if ! command -v fpc >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y fpc fpc-source
+            fi
+            local fpcdir
+            fpcdir=$(ls -d /usr/share/fpcsrc/*/ 2>/dev/null | head -1 | sed 's:/$::')
+            [[ -z "$fpcdir" ]] && fpcdir="/usr/share/fpcsrc"
+            export PP="/usr/bin/fpc"
+            export FPCDIR="$fpcdir"
+            echo "PP=/usr/bin/fpc" >> "$GITHUB_ENV"
+            echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            if ! command -v fpc >/dev/null 2>&1; then
+              brew install fpc
+            fi
+            if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
+              curl -L -o fpc-source.tar.gz "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.tar.gz/download"
+              mkdir -p "$HOME/fpcsrc"
+              tar -xzf fpc-source.tar.gz -C "$HOME/fpcsrc"
+              rm fpc-source.tar.gz
+            fi
+            local fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}"
+            [[ -d "$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}/rtl" ]] && fpcdir="$HOME/fpcsrc/fpc-${FPC_VERSION}/fpc-${FPC_VERSION}"
+            export PP
+            PP="$(command -v fpc)"
+            export FPCDIR="$fpcdir"
+            echo "PP=$PP" >> "$GITHUB_ENV"
+            echo "FPCDIR=$fpcdir" >> "$GITHUB_ENV"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [[ ! -d "$HOME/fpc" ]]; then
+              curl -L -o fpc-ootb.zip "https://github.com/fredvs/freepascal-ootb/releases/download/${FPC_VERSION}/fpc-ootb-322-x86_64-win64.zip"
+              mkdir -p "$HOME/fpc"
+              unzip -q fpc-ootb.zip -d "$HOME/fpc"
+              rm fpc-ootb.zip
+            fi
+            if [[ ! -d "$HOME/fpcsrc/fpc-${FPC_VERSION}" ]]; then
+              curl -L -o fpc-source.zip "https://sourceforge.net/projects/freepascal/files/Source/${FPC_VERSION}/fpc-${FPC_VERSION}.source.zip/download"
+              mkdir -p "$HOME/fpcsrc"
+              unzip -q fpc-source.zip -d "$HOME/fpcsrc"
+              rm fpc-source.zip
+            fi
+            local fpc_exe
+            fpc_exe=$(find "$HOME/fpc" -name "fpc-ootb-64.exe" -type f 2>/dev/null | head -1)
+            export PP="$fpc_exe"
+            export FPCDIR="$HOME/fpcsrc/fpc-${FPC_VERSION}"
+            echo "PP=$fpc_exe" >> "$GITHUB_ENV"
+            echo "FPCDIR=$HOME/fpcsrc/fpc-${FPC_VERSION}" >> "$GITHUB_ENV"
+            echo "$(dirname "$fpc_exe")" >> "$GITHUB_PATH"
+          fi
+        }
+
+        verify_fpc() {
+          if ! has_group compiled && ! has_group compiled_cpp; then
+            return
+          fi
+          local test_pas test_out
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test_pas="$TEMP/fpc_test.pas"
+            test_out="$TEMP/fpc_test"
+          else
+            test_pas="/tmp/fpc_test.pas"
+            test_out="/tmp/fpc_test"
+          fi
+          echo "program fpc_test; begin writeln('FPC works'); end." > "$test_pas"
+          "$PP" "$test_pas" -o"$test_out" >/dev/null
+          [[ -f "$test_out" || -f "${test_out}.exe" ]]
+          [[ -d "$FPCDIR" ]]
+        }
+
+        ensure_windows_action_paths
+
+        if has_group go; then install_gopls; fi
+        if has_group ruby; then install_ruby_lsp; fi
+        if has_group compiled || has_group compiled_cpp; then install_ccls; install_zls; install_verible; install_fpc; fi
+        if has_group compiled || has_group compiled_apple; then install_swift; fi
+        if has_group ocaml; then install_ocaml_packages; fi
+        if has_group data; then install_r_language_server; install_julia_language_server; fi
+        if has_group haskell; then build_haskell_repo; fi
+        if has_group niche; then install_lua_language_server; install_perl_language_server; install_ansible_tools; install_regal; fi
+        if has_group web; then install_haxe; install_elm; fi
+        if has_group nix; then install_nixd; fi
+
+        verify_ocaml_lsp
+        verify_lsp_paths
+        verify_fpc
+        rm -rf .uv-cache
+
+    - name: Report free disk space
+      if: runner.os == 'Linux'
+      shell: bash
+      run: df -h
+
+    - name: Check formatting
+      if: inputs.shard-name == 'lint-type'
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv run poe lint
+
+    - name: Type-check with mypy
+      if: inputs.shard-name == 'lint-type'
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv run poe type-check
+
+    - name: Test with pytest
+      if: inputs.shard-name != 'lint-type'
+      env:
+        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+      shell: bash
+      run: |
+        rm -rf .uv-cache
+        uv run poe test -q --tb=short -m "${{ inputs.shard-markers }}"

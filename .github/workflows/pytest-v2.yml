@@ -1,0 +1,186 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  LUA_LS_VERSION: "3.15.0"
+  VERIBLE_VERSION: "v0.0-4051-g9fdb4057"
+  REGAL_VERSION: "0.39.0"
+  FPC_VERSION: "3.2.2"
+  SWIFT_VERSION: "6.1.2"
+  ZIG_VERSION: "0.14.1"
+  ZLS_VERSION: "0.14.0"
+  ELM_VERSION: "0.19.1"
+  HAXE_VERSION: "4.3.7"
+  RUBY_VERSION: "3.4"
+  R_VERSION: "4.4.2"
+  JULIA_VERSION: "1.10"
+
+jobs:
+  tests-linux:
+    name: ${{ matrix.shard.name }} tests-linux ubuntu-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard:
+          - name: lint-type
+            tools: "python"
+            markers: ""
+          - name: core
+            tools: "python node go ruby"
+            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+          - name: web
+            tools: "python node web"
+            markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
+          - name: jvm-dotnet
+            tools: "python java dotnet clojure"
+            markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
+          - name: compiled-cpp
+            tools: "python compiled_cpp haskell lean"
+            markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
+          - name: compiled-apple
+            tools: "python compiled_apple"
+            markers: "swift"
+          - name: data
+            tools: "python data ocaml nix"
+            markers: "r or julia or ocaml or fortran or terraform or nix"
+          - name: niche-beam
+            tools: "python node elixir"
+            markers: "elixir or erlang"
+          - name: niche-script
+            tools: "python java niche"
+            markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          docker system prune -af || true
+          df -h
+
+      - name: Run shard
+        uses: ./.github/actions/test-shard
+        with:
+          shard-name: ${{ matrix.shard.name }}
+          shard-tools: ${{ matrix.shard.tools }}
+          shard-markers: ${{ matrix.shard.markers }}
+
+  tests-windows:
+    name: ${{ matrix.shard.name }} tests-windows
+    runs-on: windows-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard:
+          - name: lint-type
+            tools: "python"
+            markers: ""
+          - name: core
+            tools: "python node go ruby"
+            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+          - name: web
+            tools: "python node web"
+            markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
+          - name: jvm-dotnet
+            tools: "python java dotnet clojure"
+            markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
+          - name: compiled-cpp
+            tools: "python compiled_cpp haskell lean"
+            markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
+          - name: compiled-apple
+            tools: "python compiled_apple"
+            markers: "swift"
+          - name: data
+            tools: "python data ocaml nix"
+            markers: "r or julia or ocaml or fortran or terraform or nix"
+          - name: niche-beam
+            tools: "python node elixir"
+            markers: "elixir or erlang"
+          - name: niche-script
+            tools: "python java niche"
+            markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run shard
+        uses: ./.github/actions/test-shard
+        with:
+          shard-name: ${{ matrix.shard.name }}
+          shard-tools: ${{ matrix.shard.tools }}
+          shard-markers: ${{ matrix.shard.markers }}
+
+  tests-macos:
+    name: ${{ matrix.shard.name }} tests-macos
+    runs-on: macos-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard:
+          - name: lint-type
+            tools: "python"
+            markers: ""
+          - name: core
+            tools: "python node go ruby"
+            markers: "python or go or bash or markdown or yaml or json or toml or ruby or snapshot"
+          - name: web
+            tools: "python node web"
+            markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
+          - name: jvm-dotnet
+            tools: "python java dotnet clojure"
+            markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
+          - name: compiled-cpp
+            tools: "python compiled_cpp haskell lean"
+            markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
+          - name: compiled-apple
+            tools: "python compiled_apple"
+            markers: "swift"
+          - name: data
+            tools: "python data ocaml nix"
+            markers: "r or julia or ocaml or fortran or terraform or nix"
+          - name: niche-beam
+            tools: "python node elixir"
+            markers: "elixir or erlang"
+          - name: niche-script
+            tools: "python java niche"
+            markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run shard
+        uses: ./.github/actions/test-shard
+        with:
+          shard-name: ${{ matrix.shard.name }}
+          shard-tools: ${{ matrix.shard.tools }}
+          shard-markers: ${{ matrix.shard.markers }}
