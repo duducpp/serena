@@ -20,8 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-2025-vs2026, macos-latest]
         python-version: ["3.11"]
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
       - name: Free disk space
@@ -43,6 +45,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ">=1.17.0"
+          cache: false
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -231,7 +234,7 @@ jobs:
       - name: Install R language server
         shell: bash
         run: |
-          Rscript -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages('languageserver', repos=Sys.getenv('RSPM', 'https://cloud.r-project.org'))"
       - name: Set up Julia
         uses: julia-actions/setup-julia@v3
         with:
@@ -244,7 +247,7 @@ jobs:
         uses: haskell/ghcup-setup@v1
         with:
           ghc: '9.12.2'
-          cabal: '3.10.3.0'
+          cabal: '3.14.1.1'
           hls: '2.11.0.0'
       - name: Verify Haskell tools
         if: runner.os != 'Windows'
