@@ -1,5 +1,5 @@
 name: Set up and test CI shard
-description: Restore focused caches, install shard tools, and run a pytest marker shard.
+description: Restore shard caches, install shard tools, and run a pytest marker shard.
 
 inputs:
   shard-name:
@@ -15,76 +15,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Prepare cache directories
-      shell: bash
-      run: |
-        echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
-        echo "PNPM_HOME=$RUNNER_TEMP/pnpm-home" >> "$GITHUB_ENV"
-        echo "PNPM_STORE_DIR=$RUNNER_TEMP/pnpm-store" >> "$GITHUB_ENV"
-        echo "ELM_HOME=$RUNNER_TEMP/elm-home" >> "$GITHUB_ENV"
-        echo "R_LIBS_USER=$RUNNER_TEMP/r-library" >> "$GITHUB_ENV"
-        echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/julia" >> "$GITHUB_ENV"
-        mkdir -p \
-          "$RUNNER_TEMP/uv-cache" \
-          "$HOME/.serena/language_servers/static" \
-          "$HOME/bin" \
-          "$HOME/perl5" \
-          "$HOME/.cache/go-build" \
-          "$HOME/go/bin" \
-          "$HOME/go/pkg/mod" \
-          "$HOME/.cache/dune" \
-          "$HOME/.cabal" \
-          "$HOME/.ghcup" \
-          "$RUNNER_TEMP/pnpm-home" \
-          "$RUNNER_TEMP/pnpm-store" \
-          "$RUNNER_TEMP/elm-home" \
-          "$RUNNER_TEMP/r-library" \
-          "$RUNNER_TEMP/julia"
-        echo "$HOME/bin" >> "$GITHUB_PATH"
-        echo "$RUNNER_TEMP/pnpm-home" >> "$GITHUB_PATH"
-        echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
-        echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
-        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
-        echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
-        echo "PERL5LIB=$HOME/perl5/lib/perl5${PERL5LIB:+:${PERL5LIB}}" >> "$GITHUB_ENV"
-        echo "PERL_LOCAL_LIB_ROOT=$HOME/perl5${PERL_LOCAL_LIB_ROOT:+:${PERL_LOCAL_LIB_ROOT}}" >> "$GITHUB_ENV"
-        echo "PERL_MB_OPT=--install_base \"$HOME/perl5\"" >> "$GITHUB_ENV"
-        echo "PERL_MM_OPT=INSTALL_BASE=$HOME/perl5" >> "$GITHUB_ENV"
-
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
-      with:
-        enable-cache: true
-        cache-dependency-glob: uv.lock
-
-    - name: Restore Python cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          .venv
-          ${{ runner.temp }}/uv-cache
-        key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}-v3
-        restore-keys: |
-          python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
-          python-${{ runner.os }}-
-
-    - name: Install Python environment
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
-      shell: bash
-      run: |
-        rm -rf .uv-cache
-        uv sync --extra dev --locked
-        rm -rf .uv-cache
-
     - name: Set up Node.js
       if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
       uses: actions/setup-node@v6
@@ -111,11 +41,6 @@ runs:
           node-pnpm-${{ runner.os }}-${{ inputs.shard-name }}-
           node-pnpm-${{ runner.os }}-
 
-    - name: Configure pnpm
-      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
-      shell: bash
-      run: pnpm config set store-dir "$PNPM_STORE_DIR"
-
     - name: Restore Go cache
       if: contains(inputs.shard-tools, 'go')
       uses: actions/cache@v5
@@ -129,13 +54,6 @@ runs:
         key: go-${{ runner.os }}-gopls-latest-v2
         restore-keys: |
           go-${{ runner.os }}-
-
-    - name: Set up Go
-      if: contains(inputs.shard-tools, 'go')
-      uses: actions/setup-go@v6
-      with:
-        go-version: ">=1.17.0"
-        cache: false
 
     - name: Restore static language-server cache
       if: contains(inputs.shard-tools, 'compiled') || contains(inputs.shard-tools, 'niche') || contains(inputs.shard-tools, 'web')
@@ -228,39 +146,51 @@ runs:
           ruby-dotnet-java-${{ runner.os }}-${{ inputs.shard-name }}-
           ruby-dotnet-java-${{ runner.os }}-
 
-    - name: Set up Java
+    - name: Setup pnpm
+      if: contains(inputs.shard-tools, 'node') || contains(inputs.shard-tools, 'web')
+      shell: bash
+      run: pnpm config set store-dir "$PNPM_STORE_DIR"
+
+    - name: Setup Go
+      if: contains(inputs.shard-tools, 'go')
+      uses: actions/setup-go@v6
+      with:
+        go-version: ">=1.17.0"
+        cache: false
+
+    - name: Setup Java
       if: contains(inputs.shard-tools, 'java')
       uses: actions/setup-java@v5
       with:
         distribution: temurin
         java-version: "21"
 
-    - name: Set up .NET SDK
+    - name: Setup .NET SDK
       if: contains(inputs.shard-tools, 'dotnet')
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: "10.0.x"
 
-    - name: Set up Ruby
+    - name: Setup Ruby
       if: contains(inputs.shard-tools, 'ruby')
       uses: ruby/setup-ruby@v1
       with:
         ruby-version: ${{ env.RUBY_VERSION }}
 
-    - name: Set up Elixir
+    - name: Setup Elixir
       if: contains(inputs.shard-tools, 'elixir') && runner.os != 'Windows'
       uses: erlef/setup-beam@v1
       with:
         elixir-version: "1.19.3"
         otp-version: "28"
 
-    - name: Set up Clojure
+    - name: Setup Clojure
       if: contains(inputs.shard-tools, 'clojure')
       uses: DeLaGuardo/setup-clojure@13
       with:
         cli: latest
 
-    - name: Set up OCaml
+    - name: Setup OCaml
       if: contains(inputs.shard-tools, 'ocaml')
       uses: ocaml/setup-ocaml@v3
       with:
@@ -278,20 +208,20 @@ runs:
         "OPAM_EXE=$opam" >> $env:GITHUB_ENV
         Split-Path $opam >> $env:GITHUB_PATH
 
-    - name: Set up R
+    - name: Setup R
       if: contains(inputs.shard-tools, 'data')
       uses: r-lib/actions/setup-r@v2
       with:
         r-version: ${{ env.R_VERSION }}
         use-public-rspm: true
 
-    - name: Set up Julia
+    - name: Setup Julia
       if: contains(inputs.shard-tools, 'data')
       uses: julia-actions/setup-julia@v3
       with:
         version: ${{ env.JULIA_VERSION }}
 
-    - name: Set up Haskell toolchain
+    - name: Setup Haskell toolchain
       if: contains(inputs.shard-tools, 'haskell') && runner.os != 'Windows'
       uses: haskell/ghcup-setup@v1
       with:
@@ -299,26 +229,26 @@ runs:
         cabal: "3.10.3.0"
         hls: "2.11.0.0"
 
-    - name: Set up Zig
+    - name: Setup Zig
       if: contains(format(' {0} ', inputs.shard-tools), ' compiled_cpp ') || contains(format(' {0} ', inputs.shard-tools), ' compiled ')
       uses: goto-bus-stop/setup-zig@v2
       with:
         version: ${{ env.ZIG_VERSION }}
 
-    - name: Set up Terraform
+    - name: Setup Terraform
       if: contains(inputs.shard-tools, 'data')
       uses: hashicorp/setup-terraform@v4
       with:
         terraform_version: "1.5.0"
         terraform_wrapper: false
 
-    - name: Set up Haxe
+    - name: Setup Haxe
       if: contains(inputs.shard-tools, 'web') && runner.os != 'Linux'
       uses: krdlab/setup-haxe@v2
       with:
         haxe-version: ${{ env.HAXE_VERSION }}
 
-    - name: Set up Nix
+    - name: Setup Nix
       if: contains(inputs.shard-tools, 'nix') && runner.os != 'Windows'
       uses: cachix/install-nix-action@v31
       with:
@@ -922,36 +852,9 @@ runs:
         verify_ocaml_lsp
         verify_lsp_paths
         verify_fpc
-        rm -rf .uv-cache
-
-    - name: Report free disk space
-      if: runner.os == 'Linux'
-      shell: bash
-      run: df -h
-
-    - name: Check formatting
-      if: inputs.shard-name == 'lint-type'
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
-      shell: bash
-      run: |
-        rm -rf .uv-cache
-        uv run poe lint
-
-    - name: Type-check with mypy
-      if: inputs.shard-name == 'lint-type'
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
-      shell: bash
-      run: |
-        rm -rf .uv-cache
-        uv run poe type-check
 
     - name: Test with pytest
-      if: inputs.shard-name != 'lint-type'
       env:
         UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       shell: bash
-      run: |
-        rm -rf .uv-cache
-        uv run poe test -q --tb=short -m "${{ inputs.shard-markers }}"
+      run: uv run poe test -q --tb=short -m "${{ inputs.shard-markers }}"

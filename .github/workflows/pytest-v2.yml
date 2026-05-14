@@ -30,18 +30,75 @@ env:
   JULIA_VERSION: "1.10"
 
 jobs:
-  tests-linux:
-    name: ${{ matrix.shard.name }} tests-linux ubuntu-latest
+  lint:
+    name: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+
+    ### is it necessary to run lint on all OSes?
+    # name: ${{ matrix.os }}-lint
+    # runs-on: ${{ matrix.os }}
+    # strategy:
+    #   fail-fast: false
+    #   matrix:
+    #     os:
+    #       - ubuntu-latest
+    #       - windows-latest
+    #       - macos-latest
+
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare Python test environment
+        uses: ./.github/actions/test-setup
+
+      - name: Check formatting
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+        shell: bash
+        run: uv run poe lint
+
+  type-check:
+    name: type-check
+    runs-on: ubuntu-latest
+
+    ### is it necessary to run type-check on all OSes?
+    # name: ${{ matrix.os }}-type-check
+    # runs-on: ${{ matrix.os }}
+    # strategy:
+    #   fail-fast: false
+    #   matrix:
+    #     os:
+    #       - ubuntu-latest
+    #       - windows-latest
+    #       - macos-latest
+
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare Python test environment
+        uses: ./.github/actions/test-setup
+
+      - name: Type-check
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+        shell: bash
+        run: uv run poe type-check
+
+  tests:
+    name: ${{ matrix.os }}-tests-${{ matrix.shard.name }}
+    needs: [lint, type-check]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 10
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
         shard:
-          - name: lint-type
-            tools: "python"
-            markers: ""
           - name: core
             tools: "python node go ruby"
             markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
@@ -68,10 +125,9 @@ jobs:
             markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
     steps:
       - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
 
       - name: Free disk space
+        if: runner.os == 'Linux'
         run: |
           df -h
           sudo rm -rf /usr/local/lib/android
@@ -82,101 +138,8 @@ jobs:
           docker system prune -af || true
           df -h
 
-      - name: Run shard
-        uses: ./.github/actions/test-shard
-        with:
-          shard-name: ${{ matrix.shard.name }}
-          shard-tools: ${{ matrix.shard.tools }}
-          shard-markers: ${{ matrix.shard.markers }}
-
-  tests-windows:
-    name: ${{ matrix.shard.name }} tests-windows
-    runs-on: windows-latest
-    timeout-minutes: 75
-    strategy:
-      fail-fast: false
-      max-parallel: 10
-      matrix:
-        shard:
-          - name: lint-type
-            tools: "python"
-            markers: ""
-          - name: core
-            tools: "python node go ruby"
-            markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
-          - name: web
-            tools: "python node web"
-            markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
-          - name: jvm-dotnet
-            tools: "python java dotnet clojure"
-            markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
-          - name: compiled-cpp
-            tools: "python compiled_cpp haskell lean"
-            markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
-          - name: compiled-apple
-            tools: "python compiled_apple"
-            markers: "swift"
-          - name: data
-            tools: "python data ocaml nix"
-            markers: "r or julia or ocaml or fortran or terraform or nix"
-          - name: niche-beam
-            tools: "python node elixir"
-            markers: "elixir or erlang"
-          - name: niche-script
-            tools: "python java niche"
-            markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Run shard
-        uses: ./.github/actions/test-shard
-        with:
-          shard-name: ${{ matrix.shard.name }}
-          shard-tools: ${{ matrix.shard.tools }}
-          shard-markers: ${{ matrix.shard.markers }}
-
-  tests-macos:
-    name: ${{ matrix.shard.name }} tests-macos
-    runs-on: macos-latest
-    timeout-minutes: 75
-    strategy:
-      fail-fast: false
-      max-parallel: 10
-      matrix:
-        shard:
-          - name: lint-type
-            tools: "python"
-            markers: ""
-          - name: core
-            tools: "python node go ruby"
-            markers: "(python or go or bash or markdown or yaml or json or toml or ruby or snapshot) and not nix"
-          - name: web
-            tools: "python node web"
-            markers: "typescript or vue or svelte or php or solidity or haxe or elm or hlsl or html or scss or angular"
-          - name: jvm-dotnet
-            tools: "python java dotnet clojure"
-            markers: "java or kotlin or groovy or scala or clojure or csharp or fsharp"
-          - name: compiled-cpp
-            tools: "python compiled_cpp haskell lean"
-            markers: "rust or cpp or zig or pascal or systemverilog or haskell or lean4 or ada"
-          - name: compiled-apple
-            tools: "python compiled_apple"
-            markers: "swift"
-          - name: data
-            tools: "python data ocaml nix"
-            markers: "r or julia or ocaml or fortran or terraform or nix"
-          - name: niche-beam
-            tools: "python node elixir"
-            markers: "elixir or erlang"
-          - name: niche-script
-            tools: "python java niche"
-            markers: "lua or luau or perl or rego or ansible or dart or powershell or crystal or al or matlab or msl or bsl"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
+      - name: Prepare Python test environment
+        uses: ./.github/actions/test-setup
 
       - name: Run shard
         uses: ./.github/actions/test-shard
