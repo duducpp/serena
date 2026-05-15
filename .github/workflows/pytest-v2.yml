@@ -44,8 +44,6 @@ jobs:
         uses: ./.github/actions/test-setup
 
       - name: Check formatting
-        env:
-          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
         run: uv run poe lint
 
@@ -60,8 +58,6 @@ jobs:
         uses: ./.github/actions/test-setup
 
       - name: Type-check
-        env:
-          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
         run: uv run poe type-check
 
@@ -931,7 +927,5 @@ jobs:
           [[ -d "$FPCDIR" ]]
 
       - name: Test with pytest
-        env:
-          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
         shell: bash
         run: uv run poe test -q --tb=short -m "${{ matrix.shard.markers }}"
