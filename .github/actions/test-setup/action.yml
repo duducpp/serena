@@ -48,8 +48,6 @@ runs:
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       with:
         enable-cache: false
         restore-cache: false
@@ -67,10 +65,5 @@ runs:
           python-${{ runner.os }}-
 
     - name: Install Python environment
-      env:
-        UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
       shell: bash
-      run: |
-        rm -rf .uv-cache
-        uv sync --extra dev --locked
-        rm -rf .uv-cache
+      run: uv sync --extra dev --locked
