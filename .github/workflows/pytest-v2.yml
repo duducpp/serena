@@ -870,11 +870,11 @@ jobs:
 
           if has_group go; then
             command -v gopls >/dev/null
-            gopls version >/dev/null 2>&1 || true
+            gopls version >/dev/null
           fi
           if has_group ruby; then
             command -v ruby-lsp >/dev/null
-            ruby-lsp --version >/dev/null 2>&1 || true
+            ruby-lsp --version >/dev/null
           fi
           if has_group compiled_cpp; then
             command -v ccls >/dev/null
