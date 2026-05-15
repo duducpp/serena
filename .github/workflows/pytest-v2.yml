@@ -16,6 +16,8 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
+  GO_VERSION: "1.24.x"
+  GOPLS_VERSION: "0.17.1"
   LUA_LS_VERSION: "3.15.0"
   VERIBLE_VERSION: "v0.0-4051-g9fdb4057"
   REGAL_VERSION: "0.39.0"
@@ -32,15 +34,8 @@ env:
 
 jobs:
   lint:
-    name: ${{ matrix.os }}-lint
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-2025-vs2026
-          - macos-latest
+    name: lint
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -55,15 +50,8 @@ jobs:
         run: uv run poe lint
 
   type-check:
-    name: ${{ matrix.os }}-type-check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-2025-vs2026
-          - macos-latest
+    name: type-check
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -81,7 +69,7 @@ jobs:
     name: ${{ matrix.os }}-tests-${{ matrix.shard.name }}
     needs: [lint, type-check]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ contains('data systems', matrix.shard.name) && 60 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -126,7 +114,6 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo apt-get clean
           sudo apt-get autoremove -y
-          docker system prune -af || true
           df -h
 
       - name: Prepare Python test environment
@@ -153,7 +140,7 @@ jobs:
             ${{ runner.temp }}/pnpm-home
             ${{ runner.temp }}/pnpm-store
             ${{ runner.temp }}/elm-home
-          key: node-pnpm-${{ runner.os }}-${{ matrix.shard.name }}-${{ hashFiles('.github/workflows/pytest-v2.yml') }}
+          key: node-pnpm-${{ runner.os }}-${{ matrix.shard.name }}
           restore-keys: |
             node-pnpm-${{ runner.os }}-${{ matrix.shard.name }}-
             node-pnpm-${{ runner.os }}-
@@ -168,7 +155,7 @@ jobs:
             ~/.cache/go-build
             ~/Library/Caches/go-build
             ~/AppData/Local/go-build
-          key: go-${{ runner.os }}-gopls-latest-v2
+          key: go-${{ runner.os }}-gopls-${{ env.GOPLS_VERSION }}-v2
           restore-keys: |
             go-${{ runner.os }}-
 
@@ -191,7 +178,7 @@ jobs:
           path: |
             ~/.opam
             ~/.cache/dune
-          key: ocaml-${{ runner.os }}-${{ hashFiles('.github/workflows/pytest-v2.yml') }}
+          key: ocaml-${{ runner.os }}
           restore-keys: |
             ocaml-${{ runner.os }}-
 
@@ -219,7 +206,7 @@ jobs:
             haskell-${{ runner.os }}-
 
       - name: Restore compiled tool cache
-        if: contains(format(' {0} ', matrix.shard.tools), ' compiled_cpp ') || contains(format(' {0} ', matrix.shard.tools), ' compiled ') || contains(format(' {0} ', matrix.shard.tools), ' compiled_apple ')
+        if: contains(matrix.shard.tools, 'compiled_cpp') || contains(matrix.shard.tools, 'compiled_apple')
         uses: actions/cache@v5
         with:
           path: |
@@ -263,7 +250,7 @@ jobs:
             ruby-dotnet-java-${{ runner.os }}-${{ matrix.shard.name }}-
             ruby-dotnet-java-${{ runner.os }}-
 
-      - name: Setup pnpm
+      - name: Configure pnpm store
         if: contains(matrix.shard.tools, 'node') || contains(matrix.shard.tools, 'web')
         shell: bash
         run: pnpm config set store-dir "$PNPM_STORE_DIR"
@@ -272,7 +259,7 @@ jobs:
         if: contains(matrix.shard.tools, 'go')
         uses: actions/setup-go@v6
         with:
-          go-version: ">=1.17.0"
+          go-version: ${{ env.GO_VERSION }}
           cache: false
 
       - name: Setup Java
@@ -347,7 +334,7 @@ jobs:
           hls: "2.11.0.0"
 
       - name: Setup Zig
-        if: contains(format(' {0} ', matrix.shard.tools), ' compiled_cpp ') || contains(format(' {0} ', matrix.shard.tools), ' compiled ')
+        if: contains(matrix.shard.tools, 'compiled_cpp')
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -384,7 +371,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          has_group() { [[ " ${SHARD_TOOLS} " == *" $1 "* ]]; }
+          source "$GITHUB_WORKSPACE/.github/scripts/has_group.sh"
           ci_bin="${RUNNER_TEMP:-$HOME}/ci-bin"
           ci_bin=$(cygpath -u "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
           ci_bin_win=$(cygpath -w "$ci_bin" 2>/dev/null || printf '%s' "$ci_bin")
@@ -450,7 +437,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v gopls >/dev/null 2>&1; then
-            go install golang.org/x/tools/gopls@latest
+            go install golang.org/x/tools/gopls@v${GOPLS_VERSION}
           fi
           gopls version
 
@@ -462,7 +449,7 @@ jobs:
           if ! command -v ruby-lsp >/dev/null 2>&1; then
             gem install ruby-lsp
           fi
-          ruby-lsp --version || true
+          ruby-lsp --version
 
       - name: Install ccls
         if: contains(matrix.shard.tools, 'compiled_cpp')
@@ -486,15 +473,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          download_with_retry() {
-            local url="$1" output="$2"
-            for attempt in 1 2 3 4 5; do
-              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
-              echo "Download failed for $url on attempt $attempt"
-              sleep $((attempt * 10))
-            done
-            return 1
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/download_with_retry.sh"
           if command -v zls >/dev/null 2>&1; then
             zls --version || true
           elif [[ "$RUNNER_OS" == "Linux" ]]; then
@@ -519,15 +498,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          download_with_retry() {
-            local url="$1" output="$2"
-            for attempt in 1 2 3 4 5; do
-              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
-              echo "Download failed for $url on attempt $attempt"
-              sleep $((attempt * 10))
-            done
-            return 1
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/download_with_retry.sh"
           if command -v verible-verilog-ls >/dev/null 2>&1; then
             exit 0
           elif [[ "$RUNNER_OS" == "Linux" ]]; then
@@ -634,18 +605,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          run_opam() {
-            if [[ -n "${OPAM_EXE:-}" && -f "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" ]]; then
-              "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" "$@"
-            elif command -v opam >/dev/null 2>&1; then
-              opam "$@"
-            elif command -v opam.exe >/dev/null 2>&1; then
-              opam.exe "$@"
-            else
-              echo "opam is not available on PATH" >&2
-              return 127
-            fi
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/run_opam.sh"
           eval "$(run_opam env 2>/dev/null || true)"
           if ! run_opam exec -- which ocamllsp >/dev/null 2>&1; then
             if [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -733,15 +693,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          download_with_retry() {
-            local url="$1" output="$2"
-            for attempt in 1 2 3 4 5; do
-              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
-              echo "Download failed for $url on attempt $attempt"
-              sleep $((attempt * 10))
-            done
-            return 1
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/download_with_retry.sh"
           if ! command -v lua-language-server >/dev/null 2>&1; then
             lua_ls_dir="$HOME/.serena/language_servers/lua"
             mkdir -p "$lua_ls_dir"
@@ -829,15 +781,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          download_with_retry() {
-            local url="$1" output="$2"
-            for attempt in 1 2 3 4 5; do
-              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
-              echo "Download failed for $url on attempt $attempt"
-              sleep $((attempt * 10))
-            done
-            return 1
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/download_with_retry.sh"
           if command -v haxe >/dev/null 2>&1 && haxe -version | grep -q "^${HAXE_VERSION}$"; then
             haxe -version
           elif [[ "$RUNNER_OS" != "Linux" ]]; then
@@ -880,15 +824,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          download_with_retry() {
-            local url="$1" output="$2"
-            for attempt in 1 2 3 4 5; do
-              curl -fL --retry 3 --retry-delay 5 --retry-all-errors -o "$output" "$url" && return 0
-              echo "Download failed for $url on attempt $attempt"
-              sleep $((attempt * 10))
-            done
-            return 1
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/download_with_retry.sh"
           if ! command -v elm >/dev/null 2>&1 || ! elm --version | grep -q '^0\.19\.1$'; then
             if [[ "$RUNNER_OS" == "Linux" ]]; then
               asset="binary-for-linux-64-bit.gz"
@@ -923,18 +859,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          run_opam() {
-            if [[ -n "${OPAM_EXE:-}" && -f "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" ]]; then
-              "$(cygpath -u "$OPAM_EXE" 2>/dev/null || printf '%s' "$OPAM_EXE")" "$@"
-            elif command -v opam >/dev/null 2>&1; then
-              opam "$@"
-            elif command -v opam.exe >/dev/null 2>&1; then
-              opam.exe "$@"
-            else
-              echo "opam is not available on PATH" >&2
-              return 127
-            fi
-          }
+          source "$GITHUB_WORKSPACE/.github/scripts/run_opam.sh"
           eval "$(run_opam env 2>/dev/null || true)"
           run_opam exec -- which ocamllsp >/dev/null
           run_opam exec -- ocamllsp --version >/dev/null
@@ -945,7 +870,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          has_group() { [[ " ${SHARD_TOOLS} " == *" $1 "* ]]; }
+          source "$GITHUB_WORKSPACE/.github/scripts/has_group.sh"
 
           if has_group go; then
             command -v gopls >/dev/null
