@@ -1,0 +1,69 @@
+name: Prepare Python test environment
+description: Set up shared cache directories, Python, uv, and the project virtual environment.
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare cache directories
+      shell: bash
+      run: |
+        echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
+        echo "PNPM_HOME=$RUNNER_TEMP/pnpm-home" >> "$GITHUB_ENV"
+        echo "PNPM_STORE_DIR=$RUNNER_TEMP/pnpm-store" >> "$GITHUB_ENV"
+        echo "ELM_HOME=$RUNNER_TEMP/elm-home" >> "$GITHUB_ENV"
+        echo "R_LIBS_USER=$RUNNER_TEMP/r-library" >> "$GITHUB_ENV"
+        echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/julia" >> "$GITHUB_ENV"
+        mkdir -p \
+          "$RUNNER_TEMP/uv-cache" \
+          "$HOME/.serena/language_servers/static" \
+          "$HOME/bin" \
+          "$HOME/perl5" \
+          "$HOME/.cache/go-build" \
+          "$HOME/go/bin" \
+          "$HOME/go/pkg/mod" \
+          "$HOME/.cache/dune" \
+          "$HOME/.cabal" \
+          "$HOME/.ghcup" \
+          "$RUNNER_TEMP/pnpm-home" \
+          "$RUNNER_TEMP/pnpm-store" \
+          "$RUNNER_TEMP/elm-home" \
+          "$RUNNER_TEMP/r-library" \
+          "$RUNNER_TEMP/julia"
+        echo "$HOME/bin" >> "$GITHUB_PATH"
+        echo "$RUNNER_TEMP/pnpm-home" >> "$GITHUB_PATH"
+        echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+        echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
+        echo "PERL5LIB=$HOME/perl5/lib/perl5${PERL5LIB:+:${PERL5LIB}}" >> "$GITHUB_ENV"
+        echo "PERL_LOCAL_LIB_ROOT=$HOME/perl5${PERL_LOCAL_LIB_ROOT:+:${PERL_LOCAL_LIB_ROOT}}" >> "$GITHUB_ENV"
+        echo "PERL_MB_OPT=--install_base \"$HOME/perl5\"" >> "$GITHUB_ENV"
+        echo "PERL_MM_OPT=INSTALL_BASE=$HOME/perl5" >> "$GITHUB_ENV"
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: false
+        restore-cache: false
+        save-cache: false
+
+    - name: Restore Python cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          .venv
+          ${{ runner.temp }}/uv-cache
+        key: python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}-v3
+        restore-keys: |
+          python-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+          python-${{ runner.os }}-
+
+    - name: Install Python environment
+      shell: bash
+      run: uv sync --extra dev --locked
