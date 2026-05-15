@@ -126,7 +126,6 @@ jobs:
         uses: pnpm/action-setup@v6
         with:
           version: 10
-          run_install: false
 
       - name: Restore pnpm cache
         if: contains(matrix.shard.tools, 'node') || contains(matrix.shard.tools, 'web')
@@ -286,7 +285,7 @@ jobs:
 
       - name: Setup Clojure
         if: contains(matrix.shard.tools, 'clojure')
-        uses: DeLaGuardo/setup-clojure@13
+        uses: DeLaGuardo/setup-clojure@13  # repo uses numeric tags, no v prefix
         with:
           cli: latest
 
@@ -745,7 +744,7 @@ jobs:
       - name: Install Ansible tools
         if: contains(matrix.shard.tools, 'niche')
         shell: bash
-        run: uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv run pip install ansible-core ansible-lint
+        run: uv run python -c 'import ansible, ansiblelint' >/dev/null 2>&1 || uv pip install ansible-core ansible-lint
 
       - name: Install Regal
         if: contains(matrix.shard.tools, 'niche')
